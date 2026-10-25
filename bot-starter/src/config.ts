@@ -59,6 +59,10 @@ export interface Config {
   // Bid the native paid-tile fair bid when one is available; otherwise
   // (NATIVE_PAID_BID=0) bid v / lambda from the same engine result.
   nativePaidBid: boolean;
+  // For the first this-many auctions seen in a match, cap the paid-tile bid at v / lambda.
+  // The engine's table is fresh then and its paid arms undervalue coins
+  // (live: fair bid 2.6x v/lambda on auction 1, at or below it afterwards).
+  paidBidWarmup: number;
 }
 
 export function loadConfig(): Config {
@@ -99,5 +103,6 @@ export function loadConfig(): Config {
       : process.env.NATIVE_BID_SEARCH === "adaptive" ? "adaptive" : "coarse",
     cashMargin: num("CASH_MARGIN", 0.3),
     nativePaidBid: process.env.NATIVE_PAID_BID !== "0" && process.env.NATIVE_PAID_BID !== "false",
+    paidBidWarmup: Math.max(0, Math.floor(num("PAID_BID_WARMUP", 0))),
   };
 }

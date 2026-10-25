@@ -337,8 +337,10 @@ function bidStep(mc: MatchCtx, d: Derived, a: AuctionRow, rackKey: string, recvA
   const dec = bidAmount(v, balance, d.usableLeft, cfg, fp, lam);
   const paidBid = cfg.nativePaidBid && mc.nativeBid?.auctionId === String(a.id) && mc.nativeBid.rackKey === rackKey
     ? mc.nativeBid : null;
-  const amount = applySafeCap(Math.min(balance, paidBid ? Math.floor(paidBid.amount) : dec.amount), cfg);
-  const bidReason = paidBid ? "native paid-tile estimate" : dec.reason;
+  const warmup = paidBid !== null && mc.auctionSeen.size <= cfg.paidBidWarmup && dec.amount < Math.floor(paidBid.amount);
+  const requested = paidBid ? (warmup ? dec.amount : Math.floor(paidBid.amount)) : dec.amount;
+  const amount = applySafeCap(Math.min(balance, requested), cfg);
+  const bidReason = paidBid ? (warmup ? `paid-tile capped at v/lambda (warmup; ${dec.reason})` : "native paid-tile estimate") : dec.reason;
   const prev = mc.lastBid.get(a.id);
   const left = (mc.deadlines.get(a.id) ?? -Infinity) - performance.now();
   // Send the latest useful bid while the estimated auction is still open.
