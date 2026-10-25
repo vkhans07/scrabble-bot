@@ -13,6 +13,7 @@ export interface NativeSettings {
   oppSlope: number;
   oppJitter: number;
   threads: number;
+  cfg?: Record<string, number | boolean | string>;
 }
 
 export interface NativeEval {
@@ -25,8 +26,11 @@ export interface NativeEval {
 // Live config with time budgets lifted, so scenario counts (not machine load)
 // bound each pass and paired arms see the same amount of search.
 export function sandboxConfig(s: NativeSettings): Config {
+  const base = loadConfig();
+  for (const k of Object.keys(s.cfg ?? {}))
+    if (!(k in base)) throw new Error(`--cfg ${k}: not a Config field`);
   return {
-    ...loadConfig(),
+    ...base,
     seed: 241024,
     nativeThreads: s.threads,
     nativePaidBid: s.paidBid,
@@ -36,7 +40,8 @@ export function sandboxConfig(s: NativeSettings): Config {
     fastBudgetMs: 60_000,
     rolloutBudgetMs: 60_000,
     nativeRefineMs: 60_000,
-  };
+    ...(s.cfg ?? {}),
+  } as Config;
 }
 
 export class NativeDriver {

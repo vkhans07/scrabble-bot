@@ -3,7 +3,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { LETTER_VALUE, letterIndex } from "./dict.js";
-import { applySafeCap, bidAmount, cashinGain, inAllIn, lambdaFor, pacedLambda, shouldDumpPlan } from "./policy.js";
+import { applySafeCap, bidAmount, cashinGain, composeBid, inAllIn, lambdaFor, pacedLambda, shouldDumpPlan } from "./policy.js";
 import { makeRng } from "./rng.js";
 import { firstPriceBid, oppBid, payment, priceOf, wins, type Opp } from "./simmodel.js";
 
@@ -152,4 +152,31 @@ test("paced lambda spends the budget on the best value-per-coin letters", () => 
   // A letter at the cutoff bids its clearing price.
   const lam = pacedLambda(v, U, 100, 40, prices);
   assert.equal(bidAmount(8, 100, 30, { ...flat, lambdaMode: "paced" }, undefined, lam).amount, 10);
+});
+
+const composeCfg = { safeMaxBid: null, allinK: 5, nativePaidBid: true, paidBidWarmup: 1, earlyLambdaAuctions: 17, earlyLambdaMin: 0.4 };
+const dec = (amount: number) => ({ amount, reason: "v/lambda" });
+
+test("composeBid uses the paid-tile bid after the warmup", () => {
+  assert.equal(composeBid(dec(10), 3, 0.3, 14, 2, 60, 100, { ...composeCfg, earlyLambdaAuctions: 0 }).amount, 14);
+});
+
+test("composeBid caps the first auction's paid-tile bid at v/lambda", () => {
+  const r = composeBid(dec(10), 3, 0.3, 27, 1, 66, 100, { ...composeCfg, earlyLambdaAuctions: 0 });
+  assert.equal(r.amount, 10);
+  assert.match(r.reason, /warmup/);
+});
+
+test("composeBid applies the early lambda floor as an upper bound only", () => {
+  assert.equal(composeBid(dec(10), 3, 0.25, 14, 5, 60, 100, composeCfg).amount, 7); // floor(3 / 0.4)
+  assert.equal(composeBid(dec(4), 3, 0.25, 4, 5, 60, 100, composeCfg).amount, 4);
+  assert.equal(composeBid(dec(10), 3, 0.25, 14, 18, 60, 100, composeCfg).amount, 14); // after the window
+});
+
+test("composeBid leaves the all-in window alone", () => {
+  assert.equal(composeBid(dec(50), 3, 0.25, null, 5, 3, 50, composeCfg).amount, 50);
+});
+
+test("composeBid with NATIVE_PAID_BID=0 ignores the fair bid", () => {
+  assert.equal(composeBid(dec(9), 3, 0.3, 30, 5, 60, 100, { ...composeCfg, nativePaidBid: false, earlyLambdaAuctions: 0 }).amount, 9);
 });

@@ -24,7 +24,7 @@ import { WordReservations, shouldReplaceBid, BidTiming } from "./actions.js";
 import { loadConfig } from "./config.js";
 import { A, Dict, LETTER_VALUE } from "./dict.js";
 import { closeMatchLog, initLog, logEvent } from "./log.js";
-import { applySafeCap, bidAmount, pacedLambda, shouldDumpPlan } from "./policy.js";
+import { bidAmount, composeBid, pacedLambda, shouldDumpPlan } from "./policy.js";
 import { RackEval } from "./rackeval.js";
 import { makeRng } from "./rng.js";
 import { expectedPrices, firstPriceBid } from "./simmodel.js";
@@ -337,15 +337,9 @@ function bidStep(mc: MatchCtx, d: Derived, a: AuctionRow, rackKey: string, recvA
   const dec = bidAmount(v, balance, d.usableLeft, cfg, fp, lam);
   const paidBid = cfg.nativePaidBid && mc.nativeBid?.auctionId === String(a.id) && mc.nativeBid.rackKey === rackKey
     ? mc.nativeBid : null;
-  const warmup = paidBid !== null && mc.auctionSeen.size <= cfg.paidBidWarmup && dec.amount < Math.floor(paidBid.amount);
-  const requested = paidBid ? (warmup ? dec.amount : Math.floor(paidBid.amount)) : dec.amount;
-  // Early-phase shading: an upper bound only, outside the all-in window.
-  const early = mc.auctionSeen.size <= cfg.earlyLambdaAuctions && lam !== undefined && lam < cfg.earlyLambdaMin &&
-    !(d.usableLeft < cfg.allinK);
-  const earlyCap = early ? Math.floor(v / cfg.earlyLambdaMin) : Infinity;
-  const amount = applySafeCap(Math.min(balance, requested, earlyCap), cfg);
-  const bidReason = (paidBid ? (warmup ? `paid-tile capped at v/lambda (warmup; ${dec.reason})` : "native paid-tile estimate") : dec.reason) +
-    (requested > earlyCap ? `; early lambda floor ${cfg.earlyLambdaMin}` : "");
+  const composed = composeBid(dec, v, lam, paidBid ? paidBid.amount : null, mc.auctionSeen.size, d.usableLeft, balance, cfg);
+  const amount = composed.amount;
+  const bidReason = composed.reason;
   const prev = mc.lastBid.get(a.id);
   const left = (mc.deadlines.get(a.id) ?? -Infinity) - performance.now();
   // Send the latest useful bid while the estimated auction is still open.

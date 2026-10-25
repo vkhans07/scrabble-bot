@@ -6,7 +6,7 @@ import * as fs from "node:fs";
 import * as path from "node:path";
 import { pathToFileURL } from "node:url";
 import { A, BAG, Dict, LETTER_VALUE } from "./dict.js";
-import { bidAmount, pacedLambda, shouldDumpPlan } from "./policy.js";
+import { bidAmount, composeBid, pacedLambda, shouldDumpPlan } from "./policy.js";
 import { RackEval } from "./rackeval.js";
 import { makeRng, type Rng } from "./rng.js";
 import type { NativeDriver, NativeSettings } from "./sandbox-native.js";
@@ -104,6 +104,20 @@ function numberArg(args: string[], name: string, fallback: number): number {
   return n;
 }
 
+// --cfg KEY=value (repeatable): override one live Config field for the native
+// seat, e.g. --cfg cashMargin=0.5 --cfg earlyLambdaMin=0.4. Numbers and
+// true/false are parsed; anything else stays a string.
+function cfgOverrides(args: string[]): Record<string, number | boolean | string> {
+  const out: Record<string, number | boolean | string> = {};
+  for (let i = 0; i < args.length; i++) {
+    if (args[i] !== "--cfg") continue;
+    const [k, raw] = (args[i + 1] ?? "").split("=");
+    if (!k || raw === undefined) throw new Error("--cfg needs KEY=value");
+    out[k] = raw === "true" ? true : raw === "false" ? false : Number.isFinite(Number(raw)) ? Number(raw) : raw;
+  }
+  return out;
+}
+
 export function parseArgs(args: string[]): SandboxOptions {
   const seatArg = args.includes("--seats") ? args[args.indexOf("--seats") + 1] : undefined;
   const seats = (seatArg ?? "live-lite,planner,rack,aggressive,value,cheap")
@@ -142,6 +156,7 @@ export function parseArgs(args: string[]): SandboxOptions {
       oppSlope: numberArg(args, "--opp-slope", 2.5),
       oppJitter: numberArg(args, "--opp-jitter", 4),
       threads: intArg(args, "--native-threads", 2),
+      cfg: cfgOverrides(args),
     },
     fieldCorr: numberArg(args, "--field-corr", 0),
     fieldShift: numberArg(args, "--field-shift", 0),
@@ -529,8 +544,9 @@ async function nativeBid(
     cashWord(p, best.word);
   }
   if (!result) return 0;
-  if (cfg.nativePaidBid && result.fairBid !== null) return Math.max(0, Math.min(p.balance, Math.floor(result.fairBid)));
-  return bidAmount(result.v[letter]!, p.balance, usableLeft, cfg, undefined, result.lam).amount;
+  const v = result.v[letter]!;
+  const dec = bidAmount(v, p.balance, usableLeft, cfg, undefined, result.lam);
+  return composeBid(dec, v, result.lam, result.fairBid, round, usableLeft, p.balance, cfg).amount;
 }
 
 function dumpPlan(p: Player, ev: RackEval): void {
