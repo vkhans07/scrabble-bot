@@ -59,7 +59,7 @@ export function applySafeCap(amount: number, cfg: Pick<Config, "safeMaxBid">): n
   return cfg.safeMaxBid === null ? amount : Math.min(amount, cfg.safeMaxBid);
 }
 
-type ComposeCfg = Pick<Config, "safeMaxBid" | "allinK" | "nativePaidBid" | "paidBidWarmup" | "earlyLambdaAuctions" | "earlyLambdaMin">;
+type ComposeCfg = Pick<Config, "safeMaxBid" | "allinK" | "nativePaidBid" | "paidBidWarmup" | "earlyLambdaAuctions" | "earlyLambdaMin" | "maxBidFraction" | "maxBidFloor">;
 
 // The live bid from one engine result: the paid-tile fair bid when there is
 // one, else v / lambda (`dec`); capped at v / lambda for the first
@@ -80,9 +80,12 @@ export function composeBid(
   const requested = paid === null ? dec.amount : warmup ? dec.amount : paid;
   const early = seen <= cfg.earlyLambdaAuctions && lam !== undefined && lam < cfg.earlyLambdaMin && !(usableLeft < cfg.allinK);
   const earlyCap = early ? Math.floor(v / cfg.earlyLambdaMin) : Infinity;
-  const amount = applySafeCap(Math.max(0, Math.min(balance, requested, earlyCap)), cfg);
+  const sizeCap = cfg.maxBidFraction < 1 && !(usableLeft < cfg.allinK)
+    ? Math.max(cfg.maxBidFloor, Math.floor(cfg.maxBidFraction * balance)) : Infinity;
+  const amount = applySafeCap(Math.max(0, Math.min(balance, requested, earlyCap, sizeCap)), cfg);
   const reason = (paid === null ? dec.reason : warmup ? `paid-tile capped at v/lambda (warmup; ${dec.reason})` : "native paid-tile estimate") +
-    (requested > earlyCap ? `; early lambda floor ${cfg.earlyLambdaMin}` : "");
+    (requested > earlyCap ? `; early lambda floor ${cfg.earlyLambdaMin}` : "") +
+    (Math.min(requested, earlyCap) > sizeCap ? `; size cap ${sizeCap}` : "");
   return { amount, reason };
 }
 

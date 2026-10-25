@@ -68,6 +68,11 @@ export interface Config {
   // versus 24-46 for the leading bots. 0 disables.
   earlyLambdaAuctions: number;
   earlyLambdaMin: number;
+  // Outside the all-in window, bid at most max(MAX_BID_FLOOR,
+  // MAX_BID_FRACTION * balance): one letter bought with most of the balance
+  // (Z for 43 of 72 in match 16132) starved the rest of the match. 1 disables.
+  maxBidFraction: number;
+  maxBidFloor: number;
 }
 
 export function loadConfig(): Config {
@@ -111,5 +116,7 @@ export function loadConfig(): Config {
     paidBidWarmup: Math.max(0, Math.floor(num("PAID_BID_WARMUP", 0))),
     earlyLambdaAuctions: Math.max(0, Math.floor(num("EARLY_LAMBDA_AUCTIONS", 0))),
     earlyLambdaMin: Math.max(0, Math.min(1, num("EARLY_LAMBDA_MIN", 0))),
+    maxBidFraction: Math.max(0, Math.min(1, num("MAX_BID_FRACTION", 1))),
+    maxBidFloor: Math.max(0, num("MAX_BID_FLOOR", 20)),
   };
 }

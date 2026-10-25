@@ -154,7 +154,7 @@ test("paced lambda spends the budget on the best value-per-coin letters", () => 
   assert.equal(bidAmount(8, 100, 30, { ...flat, lambdaMode: "paced" }, undefined, lam).amount, 10);
 });
 
-const composeCfg = { safeMaxBid: null, allinK: 5, nativePaidBid: true, paidBidWarmup: 1, earlyLambdaAuctions: 17, earlyLambdaMin: 0.4 };
+const composeCfg = { safeMaxBid: null, allinK: 5, nativePaidBid: true, paidBidWarmup: 1, earlyLambdaAuctions: 17, earlyLambdaMin: 0.4, maxBidFraction: 1, maxBidFloor: 20 };
 const dec = (amount: number) => ({ amount, reason: "v/lambda" });
 
 test("composeBid uses the paid-tile bid after the warmup", () => {
@@ -179,4 +179,11 @@ test("composeBid leaves the all-in window alone", () => {
 
 test("composeBid with NATIVE_PAID_BID=0 ignores the fair bid", () => {
   assert.equal(composeBid(dec(9), 3, 0.3, 30, 5, 60, 100, { ...composeCfg, nativePaidBid: false, earlyLambdaAuctions: 0 }).amount, 9);
+});
+
+test("composeBid caps large bids at max(floor, fraction of balance) outside the all-in window", () => {
+  const cfg = { ...composeCfg, earlyLambdaAuctions: 0, maxBidFraction: 0.5 };
+  assert.equal(composeBid(dec(10), 9, 0.2, 43, 15, 50, 72, cfg).amount, 36);
+  assert.equal(composeBid(dec(10), 9, 0.2, 18, 30, 30, 25, cfg).amount, 18); // under the floor of 20
+  assert.equal(composeBid(dec(72), 9, 0.2, null, 64, 3, 72, cfg).amount, 72); // all-in window
 });
