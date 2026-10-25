@@ -17,6 +17,8 @@ export type LambdaMode = "flat_allin" | "linear" | "paced";
 export interface Config {
   dryRun: boolean;
   safeMaxBid: number | null;
+  earlyBidCap: number;
+  earlyBidAuctions: number;
   lambdaMode: LambdaMode;
   allinK: number;
   allinMinV: number;
@@ -65,6 +67,8 @@ export function loadConfig(): Config {
   return {
     dryRun: flag("DRY_RUN"),
     safeMaxBid: safe >= 0 ? safe : null,
+    earlyBidCap: Math.max(0, num("EARLY_BID_CAP", 35)),
+    earlyBidAuctions: Math.max(0, Math.floor(num("EARLY_BID_AUCTIONS", 10))),
     lambdaMode: mode,
     allinK: num("ALLIN_K", 5),
     allinMinV: num("ALLIN_MIN_V", 1),

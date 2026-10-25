@@ -337,8 +337,12 @@ function bidStep(mc: MatchCtx, d: Derived, a: AuctionRow, rackKey: string, recvA
   const dec = bidAmount(v, balance, d.usableLeft, cfg, fp, lam);
   const paidBid = mc.nativeBid?.auctionId === String(a.id) && mc.nativeBid.rackKey === rackKey
     ? mc.nativeBid : null;
-  const amount = applySafeCap(Math.min(balance, paidBid ? Math.floor(paidBid.amount) : dec.amount), cfg);
-  const bidReason = paidBid ? "native paid-tile estimate" : dec.reason;
+  const requestedAmount = Math.min(balance, paidBid ? Math.floor(paidBid.amount) : dec.amount);
+  const earlyCapActive = d.match.currentRound <= cfg.earlyBidAuctions;
+  const earlyCappedAmount = earlyCapActive ? Math.min(requestedAmount, cfg.earlyBidCap) : requestedAmount;
+  const amount = applySafeCap(earlyCappedAmount, cfg);
+  const bidReason = `${paidBid ? "native paid-tile estimate" : dec.reason}` +
+    (earlyCappedAmount < requestedAmount ? `; early cap ${cfg.earlyBidCap}` : "");
   const prev = mc.lastBid.get(a.id);
   const left = (mc.deadlines.get(a.id) ?? -Infinity) - performance.now();
   // Send the latest useful bid while the estimated auction is still open.
@@ -363,6 +367,8 @@ function bidStep(mc: MatchCtx, d: Derived, a: AuctionRow, rackKey: string, recvA
     auctionId: a.id,
     letter: a.letter,
     amount,
+    requestedAmount,
+    earlyCapActive,
     prev: prev ?? null,
     v,
     src,
@@ -998,6 +1004,7 @@ function connect() {
 function main() {
   say(
     `config: dryRun=${cfg.dryRun} lambda=${cfg.lambdaMode} safeMaxBid=${cfg.safeMaxBid ?? "off"} ` +
+      `earlyBidCap=${cfg.earlyBidCap} for ${cfg.earlyBidAuctions} auctions ` +
       `rollouts=${cfg.nRollouts} horizon=${cfg.horizon} seed=${cfg.seed}`,
   );
   startWorker();
