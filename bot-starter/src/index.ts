@@ -335,7 +335,7 @@ function bidStep(mc: MatchCtx, d: Derived, a: AuctionRow, rackKey: string, recvA
       ? pacedLambda(mc.v, d.belief.U, balance, d.usableLeft + 1, expectedPrices(opps, cfg))
       : undefined;
   const dec = bidAmount(v, balance, d.usableLeft, cfg, fp, lam);
-  const paidBid = mc.nativeBid?.auctionId === String(a.id) && mc.nativeBid.rackKey === rackKey
+  const paidBid = cfg.nativePaidBid && mc.nativeBid?.auctionId === String(a.id) && mc.nativeBid.rackKey === rackKey
     ? mc.nativeBid : null;
   const amount = applySafeCap(Math.min(balance, paidBid ? Math.floor(paidBid.amount) : dec.amount), cfg);
   const bidReason = paidBid ? "native paid-tile estimate" : dec.reason;
