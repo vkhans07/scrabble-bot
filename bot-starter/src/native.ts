@@ -63,7 +63,8 @@ export class NativeEngine {
     const cf = this.cfg;
     this.send(
       `CFG threads ${cf.nativeThreads} seed ${cf.seed} exactCap ${cf.nativeExactCap} allinK ${cf.allinK} bidSearch ${cf.nativeBidSearch === "exhaustive" ? 2 : cf.nativeBidSearch === "adaptive" ? 1 : 0} ` +
-        `allinMinV ${cf.allinMinV} endgameK ${cf.endgameK} nMax ${cf.nativeScenarios} nFast ${cf.nativeFast} nRefine ${cf.nativeRefine} refineMs ${cf.nativeRefineMs} ` +
+      `allinMinV ${cf.allinMinV} endgameK ${cf.endgameK} lamMin ${cf.minCoinValue} bidScale ${cf.bidScale} ` +
+        `nMax ${cf.nativeScenarios} nFast ${cf.nativeFast} nRefine ${cf.nativeRefine} refineMs ${cf.nativeRefineMs} ` +
         `${process.env.NATIVE_EXTRA ?? ""} fastMs ${cf.fastBudgetMs} fullMs ${cf.rolloutBudgetMs} damp ${cf.vDamp} cashK ${cf.cashinK > 8 ? 8 : cf.cashinK}`,
     );
     return true;
@@ -141,7 +142,7 @@ export class NativeEngine {
   snapshot(s: Snapshot) {
     const cf = this.cfg;
     const opps = s.opps
-      .map((o) => `${KIND[o.kind] ?? 3} ${Math.max(0, Math.round(o.balance))} ${cf.realOppBaseBonus} ${cf.realOppSlope} ${cf.realOppJitter}`)
+      .map((o) => `${KIND[o.kind] ?? 3} ${Math.max(0, Math.round(o.balance))} ${cf.realOppBaseBonus} ${cf.realOppSlope} ${cf.realOppJitter} ${o.incomePerAuction ?? 1.2}`)
       .join(" ");
     this.send(
       `SNAP ${s.seq} ${s.matchId} ${s.auctionId ?? "none"} ${s.letter} ${s.usableLeft} ${Math.round(s.balance)} ` +
