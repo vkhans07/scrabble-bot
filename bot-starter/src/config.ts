@@ -56,6 +56,9 @@ export interface Config {
   nativeBidSearch: "coarse" | "adaptive" | "exhaustive";
   // A native cash-in must beat holding by at least this many points.
   cashMargin: number;
+  // Words of 4 letters or fewer must beat holding by at least this much
+  // (and CASH_MARGIN): HO was cashed in at gain 0.57 in 16347. 0 disables.
+  shortCashMargin: number;
   // Bid the native paid-tile fair bid when one is available; otherwise
   // (NATIVE_PAID_BID=0) bid v / lambda from the same engine result.
   nativePaidBid: boolean;
@@ -117,6 +120,7 @@ export function loadConfig(): Config {
     nativeBidSearch: process.env.NATIVE_BID_SEARCH === "exhaustive" ? "exhaustive"
       : process.env.NATIVE_BID_SEARCH === "adaptive" ? "adaptive" : "coarse",
     cashMargin: num("CASH_MARGIN", 0.3),
+    shortCashMargin: Math.max(0, num("SHORT_CASH_MARGIN", 0)),
     nativePaidBid: process.env.NATIVE_PAID_BID !== "0" && process.env.NATIVE_PAID_BID !== "false",
     paidBidWarmup: Math.max(0, Math.floor(num("PAID_BID_WARMUP", 0))),
     earlyLambdaAuctions: Math.max(0, Math.floor(num("EARLY_LAMBDA_AUCTIONS", 0))),

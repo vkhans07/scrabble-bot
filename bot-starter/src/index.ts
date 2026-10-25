@@ -441,7 +441,8 @@ function applyCashin(mc: MatchCtx, m: WorkerResult) {
   if (rackKey !== m.rackKey) return; // state moved on; a fresher result is coming
   if (shouldDumpPlan(d.usableLeft, false, cfg)) return; // the endgame rule owns this
   const best = m.cashin[0];
-  if (best.gain <= (m.perf?.native ? cfg.cashMargin : 0)) return;
+  const margin = best.word.length <= 4 ? Math.max(cfg.cashMargin, cfg.shortCashMargin) : cfg.cashMargin;
+  if (best.gain <= (m.perf?.native ? margin : 0)) return;
   submitWords(mc, rackKey, [best.word], `cash-in gain=${best.gain.toFixed(2)} reward=${best.reward}`);
 }
 
