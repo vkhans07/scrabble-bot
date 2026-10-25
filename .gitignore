@@ -10,3 +10,5 @@ target/
 bot-starter/src/module_bindings/
 .vercel
 .env*
+bot-starter/logs/
+bot-starter/native/engine
