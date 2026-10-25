@@ -389,10 +389,14 @@ export function runMatch(
   // Keep planner sampling independent of the real deck/tie stream so changes
   // to rollout settings remain paired on the same game seed.
   const plannerRng = makeRng((gameSeed ^ 0xa5a5a5a5) >>> 0);
+  // Seat order decides who is dealt which starting rack. A separate stream
+  // keeps the deck unchanged and gives paired runs the same assignment.
+  const seatOrder = options.seats.slice();
+  shuffle(seatOrder, makeRng((gameSeed ^ 0x5eed5eed) >>> 0));
   const bag: number[] = [];
   for (let l = 0; l < BAG.length; l++) for (let n = 0; n < BAG[l]!; n++) bag.push(l);
   shuffle(bag, rng);
-  const players = initialPlayers(options.seats);
+  const players = initialPlayers(seatOrder);
   let cursor = 0;
   for (const p of players) for (let n = 0; n < START_RACK; n++) p.rack[bag[cursor++]! ]++;
   const remaining = bag.slice(cursor);
