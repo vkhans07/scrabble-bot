@@ -19,8 +19,6 @@ export interface Config {
   safeMaxBid: number | null;
   earlyBidCap: number;
   earlyBidAuctions: number;
-  bidScale: number;
-  minCoinValue: number;
   lambdaMode: LambdaMode;
   allinK: number;
   allinMinV: number;
@@ -71,8 +69,6 @@ export function loadConfig(): Config {
     safeMaxBid: safe >= 0 ? safe : null,
     earlyBidCap: Math.max(0, num("EARLY_BID_CAP", 35)),
     earlyBidAuctions: Math.max(0, Math.floor(num("EARLY_BID_AUCTIONS", 10))),
-    bidScale: Math.max(0, Math.min(1, num("BID_SCALE", 0.8))),
-    minCoinValue: Math.max(0.05, Math.min(1, num("MIN_COIN_VALUE", 0.35))),
     lambdaMode: mode,
     allinK: num("ALLIN_K", 5),
     allinMinV: num("ALLIN_MIN_V", 1),

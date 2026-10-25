@@ -12,7 +12,7 @@ import { Dict, LETTER_VALUE, countsOf, keyOfWord } from "./dict.js";
 import { bidAmount, cashinGain, pacedLambda } from "./policy.js";
 import { RackEval } from "./rackeval.js";
 import type { Rng } from "./rng.js";
-import { expectedPrices, firstPriceBid, oppBid, payment, priceOf, wins, type Opp } from "./simmodel.js";
+import { expectedPrices, firstPriceBid, payment, priceOf, wins, type Opp } from "./simmodel.js";
 import type { Snapshot } from "./state.js";
 
 export interface CashinCand {
@@ -122,11 +122,10 @@ export class Rollouts {
         : undefined;
 
     // Paced mode: one price of a coin for the whole horizon.
-    const lamRaw =
+    const lam =
       cfg.lambdaMode === "paced"
         ? pacedLambda(this.vPrev, snap.U, snap.balance, snap.usableLeft + 1, expectedPrices(snap.opps, oppCfg))
         : undefined;
-    const lam = lamRaw === undefined ? undefined : Math.max(cfg.minCoinValue, lamRaw);
 
     const sumBase = { v: 0 };
     const sumArm = new Float64Array(26);
@@ -142,37 +141,19 @@ export class Rollouts {
       // 1. Simulate which future letters we win in this scenario.
       for (let i = 0; i < 26; i++) withWon[i] = snap.rack[i];
       let bal = snap.balance;
-      const oppBalances = snap.opps.map((o) => o.balance);
       for (let t = 0; t < H; t++) {
         const j = t + Math.floor(rng() * (pool.length - t));
         const L = pool[j];
         pool[j] = pool[t];
         pool[t] = L;
-        const currentOpps = snap.opps.map((o, i) => {
-          oppBalances[i] += o.incomePerAuction ?? 1.2;
-          return { ...o, balance: Math.floor(oppBalances[i]) };
-        });
         for (let o = 0; o < nOpp; o++) us[o] = rng();
         const tieU = rng();
         const ul = snap.usableLeft - (t + 1);
         const d = bidAmount(this.vPrev[L], bal, ul, cfg, fpFor(L), lam);
-        const bid = ul < cfg.allinK ? d.amount : Math.floor(d.amount * cfg.bidScale);
-        const pr = priceOf(currentOpps, L, us, oppCfg);
-        if (!wins(bid, pr, tieU)) {
-          if (pr.P > 0) {
-            const bids = currentOpps.map((o, i) => oppBid(o, L, us[i], oppCfg));
-            const leaders = bids.map((b, i) => b === pr.P ? i : -1).filter((i) => i >= 0);
-            const winner = leaders[Math.min(leaders.length - 1, Math.floor(rng() * leaders.length))];
-            const second = snap.firstPrice
-              ? pr.P
-              : leaders.length > 1
-                ? pr.P
-                : Math.max(bid, 0, ...bids.filter((b) => b < pr.P));
-            oppBalances[winner] = Math.max(0, oppBalances[winner] - Math.max(1, second));
-          }
-          continue;
-        }
-        const pay = payment(bid, pr, snap.firstPrice);
+        if (d.amount <= 0) continue;
+        const pr = priceOf(snap.opps, L, us, oppCfg);
+        if (!wins(d.amount, pr, tieU)) continue;
+        const pay = payment(d.amount, pr, snap.firstPrice);
         if (pay > bal) continue;
         bal -= pay;
         withWon[L]++;

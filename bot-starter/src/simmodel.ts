@@ -13,7 +13,6 @@ export interface Opp {
   botId: string;
   balance: number;
   kind: OppKind;
-  incomePerAuction?: number;
 }
 
 export interface OppModelCfg {

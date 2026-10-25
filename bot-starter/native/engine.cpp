@@ -348,7 +348,6 @@ struct Opp {
   int bal = 100;
   double bonus = 8, slope = 2.5;
   int jit = 4;
-  double incomePerAuction = 1.2;
 };
 
 struct Cfg {
@@ -372,9 +371,8 @@ struct Cfg {
   int coinArm = 15;
   double damp = 0.5;
   double lamDamp = 0.3;
-  double lamMin = 0.35, lamMax = 1.0;
+  double lamMin = 0.05, lamMax = 1.0;
   double lamScale = 1.0;
-  double bidScale = 0.8;
 };
 static Cfg CFG;
 
@@ -442,9 +440,9 @@ static double fairBidFromCurve(double freeGain, const vector<pair<int, double>>&
 struct Scen {
   int T = 0;
   vector<int8_t> L;
-  vector<vector<float>> oppU;
+  vector<int16_t> P;
+  vector<int8_t> tied;
   vector<float> tieU;
-  vector<float> oppWinU;
 };
 
 static void makeScenario(const Snap& s, uint64_t idx, Scen& S) {
@@ -454,17 +452,27 @@ static void makeScenario(const Snap& s, uint64_t idx, Scen& S) {
     for (int k = 0; k < s.U[i] && np < 128; k++) pool[np++] = i;
   S.T = max(0, min(s.usableLeft, np));
   S.L.resize(S.T);
-  S.oppU.resize(S.T, vector<float>(s.opps.size()));
+  S.P.resize(S.T);
+  S.tied.resize(S.T);
   S.tieU.resize(S.T);
-  S.oppWinU.resize(S.T);
   for (int t = 0; t < S.T; t++) {
     int j = t + (int)(rng.u() * (np - t));
     swap(pool[t], pool[j]);
     int L = pool[t];
     S.L[t] = (int8_t)L;
-    for (size_t o = 0; o < s.opps.size(); o++) S.oppU[t][o] = (float)rng.u();
+    int P = 0, tied = 0;
+    for (const Opp& o : s.opps) {
+      int b = oppBid(o, L, rng.u());
+      if (b > P) {
+        P = b;
+        tied = 1;
+      } else if (b == P && b > 0) {
+        tied++;
+      }
+    }
+    S.P[t] = (int16_t)P;
+    S.tied[t] = (int8_t)tied;
     S.tieU[t] = (float)rng.u();
-    S.oppWinU[t] = (float)rng.u();
   }
 }
 
@@ -473,7 +481,7 @@ static void makeScenario(const Snap& s, uint64_t idx, Scen& S) {
 static inline int bidRule(double v, double lam, int bal, int ul) {
   if (bal < 1 || !(v > 0)) return 0;
   if (ul < CFG.allinK && v >= CFG.allinMinV) return bal;
-  int amt = (int)min((double)bal, floor((v / lam) * CFG.bidScale));
+  int amt = (int)min((double)bal, floor(v / lam));
   return amt < 1 ? 0 : amt;
 }
 
@@ -519,10 +527,6 @@ struct Arm {
 static double runArm(const Snap& s, const Scen& S, const Table& tb, const Arm& arm, Eval& ev) {
   Rack rack = s.rack;
   int bal = s.balance;
-  vector<double> oppBalances;
-  oppBalances.reserve(s.opps.size());
-  for (const Opp& o : s.opps) oppBalances.push_back(o.bal);
-  vector<int> oppBids(s.opps.size());
   double score = 0;
   if (arm.addLetter >= 0) rack[arm.addLetter]++;
   bal += arm.addCoins;
@@ -539,35 +543,15 @@ static double runArm(const Snap& s, const Scen& S, const Table& tb, const Arm& a
     int L = S.L[t];
     int ul = s.usableLeft - (t + 1);
     int bid = bidRule(tb.v[L], tb.lam * CFG.lamScale, bal, ul);
-    int top = 0, second = 0, tied = 0;
-    for (size_t o = 0; o < s.opps.size(); o++) {
-      oppBalances[o] += s.opps[o].incomePerAuction;
-      Opp current = s.opps[o];
-      current.bal = max(0, (int)floor(oppBalances[o]));
-      const int ob = oppBid(current, L, S.oppU[t][o]);
-      oppBids[o] = ob;
-      if (ob > top) { second = top; top = ob; tied = 1; }
-      else if (ob == top && ob > 0) { second = top; tied++; }
-      else if (ob > second) second = ob;
-    }
-    bool win = bid > top || (bid == top && bid > 0 && S.tieU[t] < 1.0f / (tied + 1));
-    if (win) {
-      int pay = min(bid, max(top, 1));
-      if (pay > bal) continue;
-      bal -= pay;
-      rack[L]++;
-      applyPolicy(rack, bal, score, ul, ev);
-    } else if (top > 0) {
-      const int selected = min(tied - 1, (int)(S.oppWinU[t] * tied));
-      int winner = -1, seen = 0;
-      for (size_t o = 0; o < oppBids.size(); o++) {
-        if (oppBids[o] != top) continue;
-        if (seen++ == selected) { winner = (int)o; break; }
-      }
-      // Opponents spend too: their balance limits later bids, and our losing
-      // bid can become the runner-up price they pay.
-      oppBalances[winner] = max(0.0, oppBalances[winner] - max(1, max(second, bid)));
-    }
+    if (bid <= 0) continue;
+    int P = S.P[t];
+    bool win = bid > P || (bid == P && S.tieU[t] < 1.0f / (S.tied[t] + 1));
+    if (!win) continue;
+    int pay = min(bid, max(P, 1));
+    if (pay > bal) continue;
+    bal -= pay;
+    rack[L]++;
+    applyPolicy(rack, bal, score, ul, ev);
   }
   int v;
   ev.plan(rack, &v);  // final auction: dump everything
@@ -690,7 +674,6 @@ static void parseCfg(istringstream& in) {
     else if (k == "nRefine") CFG.nRefine = (int)v;
     else if (k == "refineMs") CFG.refineMs = (int)v;
     else if (k == "bidSearch") CFG.bidSearch = max(0, min(2, (int)v));
-    else if (k == "lamMin") CFG.lamMin = max(0.05, min(1.0, v));
     else if (k == "fastMs") CFG.fastMs = (int)v;
     else if (k == "fullMs") CFG.fullMs = (int)v;
     else if (k == "cashK") CFG.cashK = (int)v;
@@ -698,13 +681,12 @@ static void parseCfg(istringstream& in) {
     else if (k == "damp") CFG.damp = v;
     else if (k == "lamDamp") CFG.lamDamp = v;
     else if (k == "lamScale") CFG.lamScale = v;
-    else if (k == "bidScale") CFG.bidScale = max(0.0, min(1.0, v));
   }
   for (auto& e : EVALS) e->exactCap = CFG.exactCap;
 }
 
 // SNAP seq matchId auctionId letter usableLeft balance score needCash
-//      rack*26 U*26 nOpps (kind bal bonus slope jit incomePerAuction)*nOpps
+//      rack*26 U*26 nOpps (kind bal bonus slope jit)*nOpps
 static bool parseSnap(istringstream& in, Snap& s) {
   int nc, nOpp;
   if (!(in >> s.seq >> s.matchId >> s.auctionId >> s.letter >> s.usableLeft >> s.balance >> s.score >> nc)) return false;
@@ -723,7 +705,7 @@ static bool parseSnap(istringstream& in, Snap& s) {
   s.opps.clear();
   for (int i = 0; i < nOpp; i++) {
     Opp o;
-    if (!(in >> o.kind >> o.bal >> o.bonus >> o.slope >> o.jit >> o.incomePerAuction)) return false;
+    if (!(in >> o.kind >> o.bal >> o.bonus >> o.slope >> o.jit)) return false;
     s.opps.push_back(o);
   }
   return true;

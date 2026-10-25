@@ -47,7 +47,6 @@ export interface PartRow {
 export interface MatchRow {
   id: bigint;
   status: { tag: string };
-  currentRound: number;
   currentAuctionId?: bigint | null;
   bagTotal: number;
   auctionType: { tag: string };
@@ -316,17 +315,12 @@ export function buildSnapshot(
   rackKey: string,
 ): Snapshot {
   const opps: Opp[] = [];
-  const roundsSeen = Math.max(1, d.match.currentRound - 1);
   for (const p of d.data.parts.values()) {
     if (p.botId === myBotId) continue;
-    const incomePerAuction = Math.max(0, Math.min(3,
-      (Number(p.score) + 1.2 * 8) / (roundsSeen + 8),
-    ));
     opps.push({
       botId: String(p.botId),
       balance: Number(p.balance),
       kind: oppKind(store.bots.get(p.botId)),
-      incomePerAuction,
     });
   }
   return {

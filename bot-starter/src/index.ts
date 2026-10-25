@@ -337,13 +337,7 @@ function bidStep(mc: MatchCtx, d: Derived, a: AuctionRow, rackKey: string, recvA
   const dec = bidAmount(v, balance, d.usableLeft, cfg, fp, lam);
   const paidBid = mc.nativeBid?.auctionId === String(a.id) && mc.nativeBid.rackKey === rackKey
     ? mc.nativeBid : null;
-  const rawAmount = Math.min(balance, paidBid ? Math.floor(paidBid.amount) : dec.amount);
-  // Preserve the true-value ceiling in the endgame all-in window; earlier in
-  // the match, shade model estimates to account for rollout error.
-  const scaledAmount = d.usableLeft < cfg.allinK
-    ? rawAmount
-    : Math.floor(rawAmount * cfg.bidScale);
-  const requestedAmount = Math.min(balance, scaledAmount);
+  const requestedAmount = Math.min(balance, paidBid ? Math.floor(paidBid.amount) : dec.amount);
   const earlyCapActive = d.match.currentRound <= cfg.earlyBidAuctions;
   const earlyCappedAmount = earlyCapActive ? Math.min(requestedAmount, cfg.earlyBidCap) : requestedAmount;
   const amount = applySafeCap(earlyCappedAmount, cfg);
@@ -1011,7 +1005,6 @@ function main() {
   say(
     `config: dryRun=${cfg.dryRun} lambda=${cfg.lambdaMode} safeMaxBid=${cfg.safeMaxBid ?? "off"} ` +
       `earlyBidCap=${cfg.earlyBidCap} for ${cfg.earlyBidAuctions} auctions ` +
-      `bidScale=${cfg.bidScale} minCoinValue=${cfg.minCoinValue} ` +
       `rollouts=${cfg.nRollouts} horizon=${cfg.horizon} seed=${cfg.seed}`,
   );
   startWorker();
