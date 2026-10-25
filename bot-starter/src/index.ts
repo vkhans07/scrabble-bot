@@ -337,7 +337,7 @@ function bidStep(mc: MatchCtx, d: Derived, a: AuctionRow, rackKey: string, recvA
   const dec = bidAmount(v, balance, d.usableLeft, cfg, fp, lam);
   const paidBid = cfg.nativePaidBid && mc.nativeBid?.auctionId === String(a.id) && mc.nativeBid.rackKey === rackKey
     ? mc.nativeBid : null;
-  const composed = composeBid(dec, v, lam, paidBid ? paidBid.amount : null, mc.auctionSeen.size, d.usableLeft, balance, cfg);
+  const composed = composeBid(dec, v, lam, paidBid ? paidBid.amount : null, mc.auctionSeen.size, d.usableLeft, balance, cfg, L);
   const amount = composed.amount;
   const bidReason = composed.reason;
   const prev = mc.lastBid.get(a.id);

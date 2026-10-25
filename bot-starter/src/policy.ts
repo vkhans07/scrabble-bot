@@ -59,7 +59,15 @@ export function applySafeCap(amount: number, cfg: Pick<Config, "safeMaxBid">): n
   return cfg.safeMaxBid === null ? amount : Math.min(amount, cfg.safeMaxBid);
 }
 
-type ComposeCfg = Pick<Config, "safeMaxBid" | "allinK" | "nativePaidBid" | "paidBidWarmup" | "earlyLambdaAuctions" | "earlyLambdaMin" | "maxBidFraction" | "maxBidFloor" | "reserveStart" | "reserveUntil">;
+type ComposeCfg = Pick<Config, "safeMaxBid" | "allinK" | "nativePaidBid" | "paidBidWarmup" | "earlyLambdaAuctions" | "earlyLambdaMin" | "maxBidFraction" | "maxBidFloor" | "reserveStart" | "reserveUntil" | "highLetterBoost" | "q3Boost">;
+
+// J, K, Q, X, Z: the leaders play twice as many of these as we do.
+const HIGH_LETTERS = new Set([9, 10, 16, 23, 25]);
+
+// Third quarter of a standard match, by usable auctions left.
+export function inQ3(usableLeft: number): boolean {
+  return usableLeft <= FULL_USABLE / 2 && usableLeft > FULL_USABLE / 4;
+}
 
 // Coins to hold back with `usableLeft` usable auctions to go.
 export function cashReserve(usableLeft: number, cfg: Pick<Config, "reserveStart" | "reserveUntil">): number {
@@ -81,10 +89,14 @@ export function composeBid(
   usableLeft: number,
   balance: number,
   cfg: ComposeCfg,
+  letter?: number, // 0-25
 ): BidDecision {
   const paid = cfg.nativePaidBid && fairBid !== null ? Math.floor(fairBid) : null;
   const warmup = paid !== null && seen <= cfg.paidBidWarmup && dec.amount < paid;
-  const requested = paid === null ? dec.amount : warmup ? dec.amount : paid;
+  const base = paid === null ? dec.amount : warmup ? dec.amount : paid;
+  const allin = usableLeft < cfg.allinK;
+  const boost = allin ? 1 : (letter !== undefined && HIGH_LETTERS.has(letter) ? cfg.highLetterBoost : 1) * (inQ3(usableLeft) ? cfg.q3Boost : 1);
+  const requested = boost === 1 ? base : Math.floor(base * boost);
   const early = seen <= cfg.earlyLambdaAuctions && lam !== undefined && lam < cfg.earlyLambdaMin && !(usableLeft < cfg.allinK);
   const earlyCap = early ? Math.floor(v / cfg.earlyLambdaMin) : Infinity;
   const sizeCap = cfg.maxBidFraction < 1 && !(usableLeft < cfg.allinK)
@@ -93,6 +105,7 @@ export function composeBid(
   const reserveCap = reserve > 0 ? balance - reserve : Infinity;
   const amount = applySafeCap(Math.max(0, Math.min(balance, requested, earlyCap, sizeCap, reserveCap)), cfg);
   const reason = (paid === null ? dec.reason : warmup ? `paid-tile capped at v/lambda (warmup; ${dec.reason})` : "native paid-tile estimate") +
+    (boost !== 1 ? `; boost x${boost.toFixed(2)}` : "") +
     (requested > earlyCap ? `; early lambda floor ${cfg.earlyLambdaMin}` : "") +
     (Math.min(requested, earlyCap) > sizeCap ? `; size cap ${sizeCap}` : "") +
     (Math.min(requested, earlyCap, sizeCap) > reserveCap ? `; reserve ${reserve}` : "");

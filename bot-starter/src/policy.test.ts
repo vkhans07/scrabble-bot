@@ -154,7 +154,7 @@ test("paced lambda spends the budget on the best value-per-coin letters", () => 
   assert.equal(bidAmount(8, 100, 30, { ...flat, lambdaMode: "paced" }, undefined, lam).amount, 10);
 });
 
-const composeCfg = { safeMaxBid: null, allinK: 5, nativePaidBid: true, paidBidWarmup: 1, earlyLambdaAuctions: 17, earlyLambdaMin: 0.4, maxBidFraction: 1, maxBidFloor: 20, reserveStart: 0, reserveUntil: 10 };
+const composeCfg = { safeMaxBid: null, allinK: 5, nativePaidBid: true, paidBidWarmup: 1, earlyLambdaAuctions: 17, earlyLambdaMin: 0.4, maxBidFraction: 1, maxBidFloor: 20, reserveStart: 0, reserveUntil: 10, highLetterBoost: 1, q3Boost: 1 };
 const dec = (amount: number) => ({ amount, reason: "v/lambda" });
 
 test("composeBid uses the paid-tile bid after the warmup", () => {
@@ -204,4 +204,16 @@ test("composeBid holds back the reserve outside the all-in window", () => {
   assert.equal(composeBid(dec(10), 5, 0.3, 12, 30, 38, 30, cfg).amount, 12); // under the cap
   assert.equal(composeBid(dec(10), 5, 0.3, 25, 30, 38, 10, cfg).amount, 0); // balance below reserve
   assert.equal(composeBid(dec(30), 5, 0.3, null, 64, 3, 30, cfg).amount, 30); // all-in window
+});
+
+test("composeBid boosts J/K/Q/X/Z and third-quarter bids, then applies the caps", () => {
+  const cfg = { ...composeCfg, earlyLambdaAuctions: 0, highLetterBoost: 1.2, q3Boost: 1.25 };
+  const Z = 25, E = 4;
+  assert.equal(composeBid(dec(10), 5, 0.3, 20, 10, 50, 100, cfg, Z).amount, 24); // letter only
+  assert.equal(composeBid(dec(10), 5, 0.3, 20, 40, 25, 100, cfg, E).amount, 25); // Q3 only
+  assert.equal(composeBid(dec(10), 5, 0.3, 20, 40, 25, 100, cfg, Z).amount, 30); // both
+  assert.equal(composeBid(dec(10), 5, 0.3, 20, 10, 50, 100, cfg, E).amount, 20); // neither
+  assert.equal(composeBid(dec(10), 5, 0.3, 20, 10, 50, 100, cfg).amount, 20); // letter unknown
+  assert.equal(composeBid(dec(30), 5, 0.3, null, 64, 3, 30, cfg, Z).amount, 30); // all-in window
+  assert.equal(composeBid(dec(10), 5, 0.3, 40, 40, 25, 60, { ...cfg, maxBidFraction: 0.5 }, Z).amount, 30); // size cap
 });

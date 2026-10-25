@@ -81,6 +81,11 @@ export interface Config {
   // still went broke mid-match (spend 79/0/0/92 by quarter in 16311). 0 disables.
   reserveStart: number;
   reserveUntil: number;
+  // Bid multipliers outside the all-in window: J/K/Q/X/Z (we play 0.63 a match
+  // against 1.35-1.43 for the top two), and the third quarter (we spend 25
+  // there against 50-61 for most leaders). 1 disables.
+  highLetterBoost: number;
+  q3Boost: number;
 }
 
 export function loadConfig(): Config {
@@ -129,5 +134,7 @@ export function loadConfig(): Config {
     maxBidFloor: Math.max(0, num("MAX_BID_FLOOR", 20)),
     reserveStart: Math.max(0, num("RESERVE_START", 0)),
     reserveUntil: Math.max(0, num("RESERVE_UNTIL", 10)),
+    highLetterBoost: Math.max(0, num("HIGH_LETTER_BOOST", 1)),
+    q3Boost: Math.max(0, num("Q3_BOOST", 1)),
   };
 }
