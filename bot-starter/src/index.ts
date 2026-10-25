@@ -28,9 +28,11 @@ import { bidAmount, composeBid, pacedLambda, shouldDumpPlan } from "./policy.js"
 import { RackEval } from "./rackeval.js";
 import { makeRng } from "./rng.js";
 import { expectedPrices, firstPriceBid } from "./simmodel.js";
+import { parsePriors } from "./oppmodel.js";
 import {
   Store,
   buildSnapshot,
+  type OppPriorCtx,
   derive,
   type ArchiveRow,
   type AuctionRow,
@@ -109,6 +111,24 @@ const dict = Dict.load();
 const mainEv = new RackEval(dict, cfg.exactCap);
 const mainRng = makeRng((cfg.seed ^ 0x1234567) >>> 0);
 const store = new Store();
+
+// Fitted per-opponent bid priors, only when OPP_PRIORS names a file. A file
+// that fails to load leaves the global model in place (and says so).
+function loadOppPriors(): OppPriorCtx | null {
+  if (!cfg.oppPriors) return null;
+  try {
+    const priors = parsePriors(fs.readFileSync(cfg.oppPriors, "utf8"));
+    const online = { ...priors.file.online, tau: cfg.oppOnlineTau ?? priors.file.online.tau };
+    say(`opponent priors: ${Object.keys(priors.file.bots).length} bots from ${cfg.oppPriors} (online tau=${online.tau})`);
+    logEvent(null, "opp_priors", { file: cfg.oppPriors, bots: Object.keys(priors.file.bots).length, source: priors.file.source, online });
+    return { priors, online };
+  } catch (e) {
+    console.error(tag, `OPP_PRIORS=${cfg.oppPriors} failed to load; using the global opponent model:`, e);
+    logEvent(null, "opp_priors_error", { file: cfg.oppPriors, message: String(e) });
+    return null;
+  }
+}
+const oppPriors = loadOppPriors();
 
 let conn: DbConnection | null = null;
 let myIdentity: Identity | null = null;
@@ -292,12 +312,19 @@ function onWorkerMessage(m: WorkerResult) {
 function postSnapshot(mc: MatchCtx, d: Derived, rackKey: string) {
   if (!worker || !myBotId) return;
   const need = rackKey !== mc.lastCashinKey || mc.auctionsSinceCashin >= cfg.cashinEvery;
-  const snap = buildSnapshot(store, d, myBotId, need, rackKey);
+  const snap = buildSnapshot(store, d, myBotId, need, rackKey, oppPriors);
   try {
     worker.postMessage({ type: "snapshot", snap });
     if (need) mc.cashRequests.set(snap.seq, mc.auctionsSinceCashin);
     if (mc.cashRequests.size > 64) mc.cashRequests.delete(mc.cashRequests.keys().next().value!);
-    logEvent(mc.id, "engine_request", { seq: snap.seq, needCashin: need, auctionId: snap.auctionId });
+    logEvent(mc.id, "engine_request", {
+      seq: snap.seq,
+      needCashin: need,
+      auctionId: snap.auctionId,
+      ...(oppPriors && snap.letter >= 0
+        ? { opps: snap.opps.map((o) => [o.botId, o.kind, o.priorOffset !== undefined ? +o.priorOffset.toFixed(1) : null, o.prior ? +o.prior.mu[snap.letter].toFixed(1) : null]) }
+        : {}),
+    });
   } catch (e) {
     logFailure("posting snapshot", mc.id)(e);
   }
@@ -321,7 +348,7 @@ function bidStep(mc: MatchCtx, d: Derived, a: AuctionRow, rackKey: string, recvA
     v = Math.max(mainEv.best(r) - before, LETTER_VALUE[L] + 1);
     src = "cold";
   }
-  const opps = buildSnapshot(store, d, myBotId!, false, rackKey).opps;
+  const opps = buildSnapshot(store, d, myBotId!, false, rackKey, oppPriors).opps;
   const fp =
     d.match.auctionType.tag === "FirstPrice"
       ? (value: number) => firstPriceBid(opps, L, value, balance, cfg, mainRng)

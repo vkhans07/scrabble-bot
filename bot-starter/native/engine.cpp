@@ -342,12 +342,17 @@ struct Rng {
 
 // ---------------------------------------------------------------- model
 
-enum Kind { CHEAP = 0, VALUE = 1, AGGR = 2, REAL = 3 };
+// PRIOR (4): a fitted per-opponent model (src/oppmodel.ts). With probability
+// pi no bid; otherwise clamp(round(mu[L] + sd[L] * logistic noise), 0, bal).
+enum Kind { CHEAP = 0, VALUE = 1, AGGR = 2, REAL = 3, PRIOR = 4 };
 struct Opp {
   int kind = REAL;
   int bal = 100;
   double bonus = 8, slope = 2.5;
   int jit = 4;
+  double pi = 0;
+  float mu[26] = {};
+  float sd[26] = {};
 };
 
 struct Cfg {
@@ -380,6 +385,13 @@ static const bool VOWEL[26] = {1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 0, 0, 0, 1, 0, 0
 
 static inline int oppBid(const Opp& o, int L, double u) {
   if (o.bal <= 0) return 0;
+  if (o.kind == PRIOR) {
+    if (u < o.pi) return 0;
+    double v = (u - o.pi) / (1 - o.pi);
+    v = min(1 - 1e-9, max(1e-9, v));
+    double y = o.mu[L] + o.sd[L] * log(v / (1 - v));
+    return max(0, min((int)lround(y), o.bal));
+  }
   int face = VAL[L];
   int base, jitter;
   switch (o.kind) {
@@ -686,7 +698,7 @@ static void parseCfg(istringstream& in) {
 }
 
 // SNAP seq matchId auctionId letter usableLeft balance score needCash
-//      rack*26 U*26 nOpps (kind bal bonus slope jit)*nOpps
+//      rack*26 U*26 nOpps (kind bal bonus slope jit | 4 bal pi (mu sd)*26)*nOpps
 static bool parseSnap(istringstream& in, Snap& s) {
   int nc, nOpp;
   if (!(in >> s.seq >> s.matchId >> s.auctionId >> s.letter >> s.usableLeft >> s.balance >> s.score >> nc)) return false;
@@ -705,7 +717,18 @@ static bool parseSnap(istringstream& in, Snap& s) {
   s.opps.clear();
   for (int i = 0; i < nOpp; i++) {
     Opp o;
-    if (!(in >> o.kind >> o.bal >> o.bonus >> o.slope >> o.jit)) return false;
+    if (!(in >> o.kind >> o.bal)) return false;
+    if (o.kind == PRIOR) {
+      // kind 4: bal pi (mu sd)*26
+      if (!(in >> o.pi)) return false;
+      o.pi = min(0.999, max(0.0, o.pi));
+      for (int L = 0; L < 26; L++) {
+        if (!(in >> o.mu[L] >> o.sd[L])) return false;
+        o.sd[L] = max(0.05f, o.sd[L]);
+      }
+    } else if (!(in >> o.bonus >> o.slope >> o.jit)) {
+      return false;
+    }
     s.opps.push_back(o);
   }
   return true;

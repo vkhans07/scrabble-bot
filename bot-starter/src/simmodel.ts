@@ -5,14 +5,25 @@
 // guess: face + REAL_OPP_BASE_BONUS with uniform +-REAL_OPP_JITTER.
 
 import { A, LETTER_VALUE } from "./dict.js";
+import { sampleBid } from "./oppmodel.js";
 import { makeRng, type Rng } from "./rng.js";
 
-export type OppKind = "Cheapskate" | "ValueBidder" | "Aggressive" | "Real";
+// "Prior": a fitted per-opponent model (oppmodel.ts, OPP_PRIORS), carried as
+// one logistic (mu, sd) per letter plus a no-bid probability.
+export type OppKind = "Cheapskate" | "ValueBidder" | "Aggressive" | "Real" | "Prior";
+
+export interface OppPriorTable {
+  mu: number[]; // per letter
+  sd: number[];
+  pi: number;
+}
 
 export interface Opp {
   botId: string;
   balance: number;
   kind: OppKind;
+  prior?: OppPriorTable; // set iff kind === "Prior"
+  priorOffset?: number; // the in-match offset folded into prior.mu (for logs)
 }
 
 export interface OppModelCfg {
@@ -26,6 +37,10 @@ const VOWELS = new Set([0, 4, 8, 14, 20]); // A E I O U
 // `u` is a pre-drawn uniform in [0,1), so scenarios can be reused across arms.
 export function oppBid(opp: Opp, letter: number, u: number, cfg: OppModelCfg): number {
   if (opp.balance <= 0) return 0;
+  if (opp.kind === "Prior" && opp.prior) {
+    const p = opp.prior;
+    return sampleBid({ mu: p.mu[letter], sd: p.sd[letter], pi: p.pi }, Math.floor(opp.balance), u);
+  }
   const face = LETTER_VALUE[letter];
   let base: number;
   let jitter: number;

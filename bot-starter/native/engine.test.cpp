@@ -29,6 +29,44 @@ int main(int argc, char** argv) {
   assert(runArm(s, scenario, tb, cash, ev) == runArm(s, scenario, tb, Arm{}, ev));
   puts("native cash-in regression passed");
 
+  {
+    // Opponent kind 4 (fitted prior) parses and samples as specified; the old
+    // kinds keep their format and values.
+    string line = "1 m a 4 10 50 0 0";
+    for (int i = 0; i < 52; i++) line += " 0";
+    line += " 2 4 30 0.25";
+    for (int L = 0; L < 26; L++) line += L == 25 ? " 40 0.05" : " 6.4 0.05";
+    line += " 3 30 8 2.5 4";
+    istringstream in(line);
+    Snap ps;
+    assert(parseSnap(in, ps));
+    assert(ps.opps.size() == 2);
+    const Opp& p = ps.opps[0];
+    assert(p.kind == PRIOR && p.bal == 30 && abs(p.pi - 0.25) < 1e-12);
+    assert(oppBid(p, 0, 0.1) == 0);    // u < pi: no bid
+    assert(oppBid(p, 0, 0.625) == 6);  // median of the rest: round(6.4)
+    assert(oppBid(p, 25, 0.625) == 30); // capped at balance
+    const Opp& r = ps.opps[1];
+    assert(r.kind == REAL && r.bal == 30 && r.bonus == 8 && r.slope == 2.5 && r.jit == 4);
+    assert(oppBid(r, 0, 0.5) == 11);   // round(8 + 2.5) + jitter 0
+    // A wide prior's empirical median and no-bid share.
+    Opp w = p;
+    for (int L = 0; L < 26; L++) w.sd[L] = 3;
+    w.bal = 100;
+    Rng rr(9);
+    int zeros = 0, below = 0, n = 200000;
+    for (int k = 0; k < n; k++) {
+      int b = oppBid(w, 3, rr.u());
+      zeros += b == 0;
+      below += b > 0 && b <= 6;
+    }
+    // P(0) = pi + (1 - pi) F((0.5 - 6.4) / 3); P(1..6) = (1 - pi) (F(-0.1/3) - F(-5.9/3))
+    auto F = [](double z) { return 1 / (1 + exp(-z)); };
+    assert(abs(zeros / (double)n - (0.25 + 0.75 * F(-5.9 / 3))) < 0.005);
+    assert(abs(below / (double)n - 0.75 * (F(0.1 / 3) - F(-5.9 / 3))) < 0.005);
+    puts("native prior-opponent regression passed");
+  }
+
   CFG.threads = 1;
   CFG.memoLog2 = 10;
   s.seq = 7;
