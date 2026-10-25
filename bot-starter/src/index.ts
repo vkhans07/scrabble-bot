@@ -760,19 +760,48 @@ function inRunningMatch(c: DbConnection): boolean {
   return false;
 }
 
+let lobbyJoinInFlight = false;
+let lobbyRetryTimer: NodeJS.Timeout | null = null;
+let lobbyRetryDelay = 1000;
+function scheduleLobbyRetry(delay = lobbyRetryDelay) {
+  if (lobbyRetryTimer || stopping) return;
+  lobbyRetryTimer = setTimeout(() => {
+    lobbyRetryTimer = null;
+    joinLobby();
+  }, delay);
+  lobbyRetryDelay = Math.min(lobbyRetryDelay * 2, 30000);
+}
+
 function joinLobby() {
   const c = conn;
   if (!c || myBotId === null || TOURNAMENT_ID || stopping || (maxMatches > 0 && completedMatches >= maxMatches)) return;
-  if (inRunningMatch(c)) return;
+  if (inRunningMatch(c)) {
+    lobbyRetryDelay = 1000;
+    return;
+  }
   const openLobby = Array.from(c.db.lobby.iter()).find((l) => l.status.tag === "Open");
   const alreadyIn =
     openLobby !== undefined &&
     Array.from(c.db.lobbyMember.iter()).some(
       (lm) => lm.lobbyId === openLobby.id && lm.botId === myBotId,
     );
-  if (alreadyIn) return;
+  if (alreadyIn) {
+    lobbyRetryDelay = 1000;
+    return;
+  }
+  if (lobbyJoinInFlight) return;
+  lobbyJoinInFlight = true;
   say("joining lobby");
-  c.reducers.joinLobby({}).catch(logFailure("joining the lobby"));
+  c.reducers.joinLobby({}).then(() => {
+    // Reducer success can precede the local subscription update. Recheck once
+    // the cache has had a moment to receive the lobby-member insert.
+    scheduleLobbyRetry(1200);
+  }).catch((err: unknown) => {
+    logFailure("joining the lobby")(err);
+    scheduleLobbyRetry();
+  }).finally(() => {
+    lobbyJoinInFlight = false;
+  });
 }
 
 function bootstrapActivity(c: DbConnection) {
@@ -947,6 +976,9 @@ function connect() {
         say("disconnected");
         logEvent(null, "disconnected");
         conn = null;
+        lobbyJoinInFlight = false;
+        if (lobbyRetryTimer) clearTimeout(lobbyRetryTimer);
+        lobbyRetryTimer = null;
         // The mirror is gone; it is rebuilt from the new subscription.
         for (const q of reservations.values()) q.disconnect();
         savePending();
@@ -978,7 +1010,7 @@ function main() {
       safe("watchdog", () => {
         if (conn && myBotId !== null && !inRunningMatch(conn)) joinLobby();
       }),
-      20000,
+      5000,
     );
   }
 }
