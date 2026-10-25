@@ -339,8 +339,13 @@ function bidStep(mc: MatchCtx, d: Derived, a: AuctionRow, rackKey: string, recvA
     ? mc.nativeBid : null;
   const warmup = paidBid !== null && mc.auctionSeen.size <= cfg.paidBidWarmup && dec.amount < Math.floor(paidBid.amount);
   const requested = paidBid ? (warmup ? dec.amount : Math.floor(paidBid.amount)) : dec.amount;
-  const amount = applySafeCap(Math.min(balance, requested), cfg);
-  const bidReason = paidBid ? (warmup ? `paid-tile capped at v/lambda (warmup; ${dec.reason})` : "native paid-tile estimate") : dec.reason;
+  // Early-phase shading: an upper bound only, outside the all-in window.
+  const early = mc.auctionSeen.size <= cfg.earlyLambdaAuctions && lam !== undefined && lam < cfg.earlyLambdaMin &&
+    !(d.usableLeft < cfg.allinK);
+  const earlyCap = early ? Math.floor(v / cfg.earlyLambdaMin) : Infinity;
+  const amount = applySafeCap(Math.min(balance, requested, earlyCap), cfg);
+  const bidReason = (paidBid ? (warmup ? `paid-tile capped at v/lambda (warmup; ${dec.reason})` : "native paid-tile estimate") : dec.reason) +
+    (requested > earlyCap ? `; early lambda floor ${cfg.earlyLambdaMin}` : "");
   const prev = mc.lastBid.get(a.id);
   const left = (mc.deadlines.get(a.id) ?? -Infinity) - performance.now();
   // Send the latest useful bid while the estimated auction is still open.

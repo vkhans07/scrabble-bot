@@ -63,6 +63,11 @@ export interface Config {
   // The engine's table is fresh then and its paid arms undervalue coins
   // (live: fair bid 2.6x v/lambda on auction 1, at or below it afterwards).
   paidBidWarmup: number;
+  // Over the first earlyLambdaAuctions auctions seen, bid at most
+  // v / max(lambda, earlyLambdaMin): we spend ~78 coins in the first quarter
+  // versus 24-46 for the leading bots. 0 disables.
+  earlyLambdaAuctions: number;
+  earlyLambdaMin: number;
 }
 
 export function loadConfig(): Config {
@@ -104,5 +109,7 @@ export function loadConfig(): Config {
     cashMargin: num("CASH_MARGIN", 0.3),
     nativePaidBid: process.env.NATIVE_PAID_BID !== "0" && process.env.NATIVE_PAID_BID !== "false",
     paidBidWarmup: Math.max(0, Math.floor(num("PAID_BID_WARMUP", 0))),
+    earlyLambdaAuctions: Math.max(0, Math.floor(num("EARLY_LAMBDA_AUCTIONS", 0))),
+    earlyLambdaMin: Math.max(0, Math.min(1, num("EARLY_LAMBDA_MIN", 0))),
   };
 }
