@@ -190,7 +190,7 @@ function removeWord(rack: Uint8Array, word: string): void {
   for (const c of word) rack[c.charCodeAt(0) - A]--;
 }
 
-function wordReward(word: string): number {
+export function wordReward(word: string): number {
   let base = 0;
   for (const c of word) base += LETTER_VALUE[c.charCodeAt(0) - A]!;
   if (word.length <= 3) return base;
@@ -226,7 +226,7 @@ function playFaceWord(p: Player, byLength: string[]): void {
 
 const longestCache = new Map<string, string | null>();
 
-function fits(word: string, rack: Uint8Array): boolean {
+export function fits(word: string, rack: Uint8Array): boolean {
   const need = new Uint8Array(26);
   for (const c of word) {
     const i = c.charCodeAt(0) - A;
