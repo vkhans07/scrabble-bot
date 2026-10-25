@@ -39,3 +39,51 @@ leftover rack value.
 For a paired comparison, run the same seed range and seat list while changing
 one policy parameter or version. Keep the game count and rollout settings the
 same. Use at least 100 games before treating small differences as meaningful.
+
+## Live-engine and field seats
+
+- `native`: the live bot's decision loop driven through the real native
+  engine (`npm run build:native` first). Each auction it posts a snapshot of
+  what the live client would know (own start rack, auctioned letters, tiles
+  opponents revealed in words, opponent balances), waits for the full result,
+  plays a cash-in that beats holding by `CASH_MARGIN`, dumps its plan when
+  `usableLeft <= ENDGAME_K`, and bids the paid-tile fair bid (or v/lambda with
+  `--native-paid-bid 0`, the same switch as `NATIVE_PAID_BID=0` live). Time
+  budgets are lifted so scenario counts, not machine load, bound each pass;
+  live passes can be cut short by the 1-second auction. `--opp-bonus`,
+  `--opp-slope` and `--opp-jitter` set the engine's opponent model, and
+  `--native-threads` its threads. Other `NATIVE_*`/policy env vars apply.
+- `profile:<bot>`: bids from that bot's fitted model in
+  `data/opponent-profiles.json`: latent bid `a + b*face + c*vowel +
+  d*progress + e*endgame + N(0, sigma)`, capped at its balance, fitted with
+  censoring from public matches (winning bids are archived; a losing bid is at
+  most the runner-up price). Words follow the strategic cash rule above.
+- `field`: draws a `profile:<bot>` per seat per game, weighted by how many
+  public matches each bot played, to stand in for a lobby or tournament table.
+
+Profiles describe bidding only. Word choice, timing, and anything a bot does
+in reaction to its rack are not observed this way, so field seats are an
+approximation of real opponents, not replicas.
+
+Paired comparisons with worker threads (each game seed is played by both arms
+in the same worker):
+
+```sh
+nice -n 19 npm run sandbox:pair -- --jobs 4 --games 200 --seed 42 \
+  --seats native,field,field,field,field,field --focus native \
+  --base "--native-paid-bid 1" --cand "--native-paid-bid 0" \
+  --out logs/claude-evals/e1.json
+```
+
+Run it under Node 26 (`/opt/homebrew/bin/node --import tsx src/sandbox-pair.ts`)
+if `node` resolves to an older Node whose tsx loader cannot resolve `.js`
+imports. Keep `nice` and modest `--jobs` while a live bot shares the machine.
+
+Field calibration (2026-10-24, `logs/claude-evals/calib-*.json`): rack-blind
+profiles reproduced live top bids but left runner-up prices 3–4 coins low and
+starved the economy. `--field-rack 1` (default) adds the letter's exact
+marginal value to the seat's own rack; with it, simulated runner-up prices are
+within 1.3 coins of live for every face value and tiles/words match. Known
+gaps: the simulated field ends with ~11 more coins and ~4 fewer points than
+live (its word rule cashes late). `--field-shift`, `--field-sigma` and
+`--field-corr` are kept for sensitivity checks.

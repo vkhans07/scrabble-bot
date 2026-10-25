@@ -1,0 +1,496 @@
+{
+ "description": "Censored linear bid models per public bot, fitted from 325 public matches fetched 2026-10-24 (logs/claude-evals/scripts/fit_profiles.py). Our own bot (tosh_lupoi) is excluded.",
+ "model": "bid = clamp(round(a + b_face*face + c_vowel*vowel + d_late*progress + e_endgame*[auctions after this < 6] + sigma*N(0,1)), 0, balance)",
+ "profiles": {
+  "Lionel": {
+   "botId": 107,
+   "matches": 33,
+   "a": -4.38,
+   "b_face": 4.06,
+   "c_vowel": 1.07,
+   "d_late": 3.97,
+   "e_endgame": 7.54,
+   "sigma": 9.27
+  },
+  "TileShark": {
+   "botId": 19,
+   "matches": 47,
+   "a": -3.13,
+   "b_face": 4.06,
+   "c_vowel": -0.71,
+   "d_late": -8.12,
+   "e_endgame": -1.17,
+   "sigma": 12.89
+  },
+  "benx": {
+   "botId": 39,
+   "matches": 20,
+   "a": -13.32,
+   "b_face": 3.98,
+   "c_vowel": -1.52,
+   "d_late": 11.32,
+   "e_endgame": -0.93,
+   "sigma": 14.84
+  },
+  "Torch": {
+   "botId": 99,
+   "matches": 23,
+   "a": 4.01,
+   "b_face": 3.24,
+   "c_vowel": -0.44,
+   "d_late": -0.06,
+   "e_endgame": -0.95,
+   "sigma": 5.87
+  },
+  "PathAndLight": {
+   "botId": 45,
+   "matches": 32,
+   "a": -7.68,
+   "b_face": 4.22,
+   "c_vowel": -0.93,
+   "d_late": 4.45,
+   "e_endgame": -2.09,
+   "sigma": 11.98
+  },
+  "polarbear": {
+   "botId": 48,
+   "matches": 29,
+   "a": -12.27,
+   "b_face": 4.07,
+   "c_vowel": -0.81,
+   "d_late": 11.39,
+   "e_endgame": -2.19,
+   "sigma": 14.05
+  },
+  "triplo": {
+   "botId": 89,
+   "matches": 31,
+   "a": -8.85,
+   "b_face": 2.83,
+   "c_vowel": -2.24,
+   "d_late": 13.9,
+   "e_endgame": 2.0,
+   "sigma": 12.75
+  },
+  "BuySpellRepeat-bot": {
+   "botId": 131,
+   "matches": 28,
+   "a": -8.78,
+   "b_face": 4.46,
+   "c_vowel": -2.3,
+   "d_late": -3.87,
+   "e_endgame": -6.54,
+   "sigma": 16.3
+  },
+  "keanu_reeves": {
+   "botId": 21,
+   "matches": 26,
+   "a": -9.78,
+   "b_face": 4.64,
+   "c_vowel": 0.98,
+   "d_late": 7.06,
+   "e_endgame": -2.96,
+   "sigma": 11.41
+  },
+  "Menice": {
+   "botId": 90,
+   "matches": 34,
+   "a": -22.51,
+   "b_face": 3.44,
+   "c_vowel": -0.07,
+   "d_late": 29.76,
+   "e_endgame": 9.22,
+   "sigma": 15.5
+  },
+  "Metheny": {
+   "botId": 85,
+   "matches": 22,
+   "a": -0.22,
+   "b_face": 3.74,
+   "c_vowel": -1.3,
+   "d_late": 2.87,
+   "e_endgame": -4.11,
+   "sigma": 8.43
+  },
+  "MeniceLab2": {
+   "botId": 115,
+   "matches": 65,
+   "a": -22.08,
+   "b_face": 3.04,
+   "c_vowel": -1.57,
+   "d_late": 29.05,
+   "e_endgame": 11.74,
+   "sigma": 15.65
+  },
+  "K-13": {
+   "botId": 127,
+   "matches": 81,
+   "a": -3.33,
+   "b_face": 3.5,
+   "c_vowel": -1.65,
+   "d_late": 7.82,
+   "e_endgame": 8.87,
+   "sigma": 7.3
+  },
+  "Dwight": {
+   "botId": 98,
+   "matches": 26,
+   "a": -12.51,
+   "b_face": 4.4,
+   "c_vowel": -1.22,
+   "d_late": 20.15,
+   "e_endgame": -2.55,
+   "sigma": 11.4
+  },
+  "Tessera": {
+   "botId": 128,
+   "matches": 28,
+   "a": -9.08,
+   "b_face": 2.66,
+   "c_vowel": -0.54,
+   "d_late": -6.01,
+   "e_endgame": -13.38,
+   "sigma": 17.16
+  },
+  "Waupus": {
+   "botId": 138,
+   "matches": 57,
+   "a": -3.53,
+   "b_face": 3.72,
+   "c_vowel": -0.69,
+   "d_late": 5.53,
+   "e_endgame": 10.67,
+   "sigma": 9.04
+  },
+  "SookraBot": {
+   "botId": 9,
+   "matches": 33,
+   "a": -13.41,
+   "b_face": 4.34,
+   "c_vowel": 0.18,
+   "d_late": 14.95,
+   "e_endgame": 30.81,
+   "sigma": 12.95
+  },
+  "swrjlab": {
+   "botId": 122,
+   "matches": 28,
+   "a": -3.26,
+   "b_face": 3.0,
+   "c_vowel": -2.25,
+   "d_late": 3.52,
+   "e_endgame": 3.72,
+   "sigma": 11.54
+  },
+  "ClaudeLab": {
+   "botId": 110,
+   "matches": 48,
+   "a": 0.12,
+   "b_face": 3.02,
+   "c_vowel": -0.8,
+   "d_late": 5.83,
+   "e_endgame": -0.21,
+   "sigma": 7.65
+  },
+  "scrabby": {
+   "botId": 116,
+   "matches": 23,
+   "a": -5.5,
+   "b_face": 2.94,
+   "c_vowel": 0.44,
+   "d_late": 4.02,
+   "e_endgame": 16.71,
+   "sigma": 11.66
+  },
+  "testbot": {
+   "botId": 73,
+   "matches": 48,
+   "a": 4.2,
+   "b_face": 3.13,
+   "c_vowel": -0.86,
+   "d_late": 0.68,
+   "e_endgame": 5.77,
+   "sigma": 5.07
+  },
+  "Jobs": {
+   "botId": 133,
+   "matches": 29,
+   "a": -2.19,
+   "b_face": 3.63,
+   "c_vowel": 0.96,
+   "d_late": 4.54,
+   "e_endgame": 3.04,
+   "sigma": 7.85
+  },
+  "Chinese Dante": {
+   "botId": 22,
+   "matches": 81,
+   "a": -2.67,
+   "b_face": 3.07,
+   "c_vowel": -1.14,
+   "d_late": 5.61,
+   "e_endgame": 5.81,
+   "sigma": 9.66
+  },
+  "code": {
+   "botId": 11,
+   "matches": 22,
+   "a": 4.03,
+   "b_face": 2.44,
+   "c_vowel": 0.63,
+   "d_late": -2.34,
+   "e_endgame": 3.68,
+   "sigma": 7.92
+  },
+  "Lambi Lambiii": {
+   "botId": 77,
+   "matches": 84,
+   "a": -4.44,
+   "b_face": 3.61,
+   "c_vowel": -0.96,
+   "d_late": 6.79,
+   "e_endgame": 0.15,
+   "sigma": 10.28
+  },
+  "newBose": {
+   "botId": 71,
+   "matches": 20,
+   "a": 6.52,
+   "b_face": 1.29,
+   "c_vowel": -0.93,
+   "d_late": 1.28,
+   "e_endgame": 2.56,
+   "sigma": 6.13
+  },
+  "maverick-bot": {
+   "botId": 62,
+   "matches": 37,
+   "a": -0.2,
+   "b_face": 2.86,
+   "c_vowel": -0.75,
+   "d_late": 0.33,
+   "e_endgame": -0.45,
+   "sigma": 10.72
+  },
+  "podzemski": {
+   "botId": 15,
+   "matches": 29,
+   "a": -38.65,
+   "b_face": 2.16,
+   "c_vowel": -1.11,
+   "d_late": 17.94,
+   "e_endgame": 4.89,
+   "sigma": 26.59
+  },
+  "BlackSwan": {
+   "botId": 97,
+   "matches": 21,
+   "a": -2.59,
+   "b_face": 2.46,
+   "c_vowel": -1.98,
+   "d_late": 9.33,
+   "e_endgame": 9.28,
+   "sigma": 8.88
+  },
+  "Ambees": {
+   "botId": 104,
+   "matches": 31,
+   "a": -8.53,
+   "b_face": 3.07,
+   "c_vowel": -2.4,
+   "d_late": 17.75,
+   "e_endgame": -10.11,
+   "sigma": 9.24
+  },
+  "sardine": {
+   "botId": 58,
+   "matches": 24,
+   "a": -10.9,
+   "b_face": 3.78,
+   "c_vowel": 0.28,
+   "d_late": 13.88,
+   "e_endgame": -11.39,
+   "sigma": 11.37
+  },
+  "bot": {
+   "botId": 7,
+   "matches": 21,
+   "a": -1.28,
+   "b_face": 2.62,
+   "c_vowel": -0.1,
+   "d_late": -9.07,
+   "e_endgame": 7.17,
+   "sigma": 14.39
+  },
+  "richard": {
+   "botId": 126,
+   "matches": 32,
+   "a": -5.72,
+   "b_face": 0.77,
+   "c_vowel": -1.32,
+   "d_late": -5.79,
+   "e_endgame": 3.14,
+   "sigma": 12.05
+  },
+  "Bron": {
+   "botId": 114,
+   "matches": 29,
+   "a": -1.02,
+   "b_face": 2.28,
+   "c_vowel": -0.75,
+   "d_late": 6.05,
+   "e_endgame": 7.06,
+   "sigma": 8.13
+  },
+  "havrais": {
+   "botId": 75,
+   "matches": 26,
+   "a": -4.58,
+   "b_face": 1.79,
+   "c_vowel": 2.35,
+   "d_late": 15.35,
+   "e_endgame": 12.28,
+   "sigma": 7.92
+  },
+  "Nigel": {
+   "botId": 129,
+   "matches": 27,
+   "a": 0.28,
+   "b_face": 3.41,
+   "c_vowel": -2.05,
+   "d_late": -2.75,
+   "e_endgame": 5.03,
+   "sigma": 9.22
+  },
+  "MeniceLab": {
+   "botId": 113,
+   "matches": 26,
+   "a": -10.88,
+   "b_face": 3.11,
+   "c_vowel": -2.32,
+   "d_late": 14.1,
+   "e_endgame": 9.96,
+   "sigma": 13.16
+  },
+  "James_Bond_007": {
+   "botId": 94,
+   "matches": 24,
+   "a": 1.07,
+   "b_face": 4.15,
+   "c_vowel": -1.53,
+   "d_late": -2.33,
+   "e_endgame": -0.91,
+   "sigma": 8.03
+  },
+  "Nijello": {
+   "botId": 59,
+   "matches": 21,
+   "a": -2.02,
+   "b_face": 3.92,
+   "c_vowel": 0.77,
+   "d_late": 6.3,
+   "e_endgame": 5.0,
+   "sigma": 5.94
+  },
+  "Karthik": {
+   "botId": 74,
+   "matches": 34,
+   "a": -0.32,
+   "b_face": 3.43,
+   "c_vowel": -1.2,
+   "d_late": 1.66,
+   "e_endgame": 3.09,
+   "sigma": 8.08
+  },
+  "eskeetit": {
+   "botId": 124,
+   "matches": 32,
+   "a": 2.52,
+   "b_face": 2.68,
+   "c_vowel": -1.01,
+   "d_late": -8.65,
+   "e_endgame": -0.02,
+   "sigma": 11.84
+  },
+  "67": {
+   "botId": 123,
+   "matches": 27,
+   "a": -21.11,
+   "b_face": 4.6,
+   "c_vowel": -1.65,
+   "d_late": 24.59,
+   "e_endgame": -7.86,
+   "sigma": 13.64
+  },
+  "Calebot": {
+   "botId": 119,
+   "matches": 21,
+   "a": 4.81,
+   "b_face": 3.09,
+   "c_vowel": -2.59,
+   "d_late": -8.14,
+   "e_endgame": 3.9,
+   "sigma": 9.26
+  },
+  "Cashu": {
+   "botId": 66,
+   "matches": 30,
+   "a": 3.64,
+   "b_face": 2.39,
+   "c_vowel": -3.25,
+   "d_late": -4.01,
+   "e_endgame": 13.2,
+   "sigma": 7.86
+  },
+  "postturing": {
+   "botId": 52,
+   "matches": 23,
+   "a": 5.13,
+   "b_face": 2.34,
+   "c_vowel": -1.7,
+   "d_late": 0.33,
+   "e_endgame": 2.51,
+   "sigma": 4.9
+  },
+  "Ally": {
+   "botId": 64,
+   "matches": 25,
+   "a": -12.0,
+   "b_face": 2.61,
+   "c_vowel": 1.66,
+   "d_late": 16.27,
+   "e_endgame": 14.56,
+   "sigma": 10.28
+  },
+  "scrappybot": {
+   "botId": 43,
+   "matches": 28,
+   "a": -2.51,
+   "b_face": 2.6,
+   "c_vowel": -0.37,
+   "d_late": 1.26,
+   "e_endgame": -6.12,
+   "sigma": 12.55
+  },
+  "chad": {
+   "botId": 108,
+   "matches": 20,
+   "a": 6.01,
+   "b_face": -0.07,
+   "c_vowel": -2.06,
+   "d_late": -3.89,
+   "e_endgame": 2.06,
+   "sigma": 8.3
+  },
+  "guesser": {
+   "botId": 55,
+   "matches": 22,
+   "a": 1.44,
+   "b_face": 2.61,
+   "c_vowel": -0.71,
+   "d_late": 3.83,
+   "e_endgame": 0.31,
+   "sigma": 6.86
+  }
+ }
+}

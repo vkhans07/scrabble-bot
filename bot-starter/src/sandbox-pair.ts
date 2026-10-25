@@ -15,11 +15,12 @@ import { Worker, isMainThread, parentPort, workerData } from "node:worker_thread
 import { Dict } from "./dict.js";
 import { RackEval } from "./rackeval.js";
 import { parseArgs, runMatch, summarize, type SandboxOptions } from "./sandbox.js";
+import { NativeDriver, sandboxConfig } from "./sandbox-native.js";
 
 type Game = Record<string, unknown>;
 interface Job { indices: number[]; base: SandboxOptions; cand: SandboxOptions }
 
-const METRICS = ["wonMatch", "place", "score", "balance", "spent", "tilesWon", "words", "playableRackValue"] as const;
+const METRICS = ["wonMatch", "lastPlace", "place", "score", "balance", "spent", "tilesWon", "words", "playableRackValue"] as const;
 
 function gameSeed(seed: number, i: number): number {
   return (seed + Math.imul(i, 0x9e3779b9)) >>> 0;
@@ -117,17 +118,36 @@ async function main(argv: string[]) {
   }
   console.log(`spentByQuarter base ${result.spentByQuarter.base.map((x) => x.toFixed(1)).join("/")} cand ${result.spentByQuarter.cand.map((x) => x.toFixed(1)).join("/")}`);
   for (const [name, s] of [["base", result.baseSummary], ["cand", result.candSummary]] as const)
-    for (const r of s) console.log(`${name} ${String(r.policy).padEnd(10)} win ${(100 * r.winRate).toFixed(1)}% place ${r.averagePlace.toFixed(2)} score ${r.averageScore.toFixed(1)} cash ${r.averageBalance.toFixed(1)} spent ${r.averageSpent.toFixed(1)} tiles ${r.averageTilesWon.toFixed(1)} words ${r.averageWords.toFixed(2)} rack ${r.averagePlayableRackValue.toFixed(1)}`);
+    for (const r of s) console.log(`${name} ${String(r.policy).padEnd(10)} win ${(100 * r.winRate).toFixed(1)}% last ${(100 * r.lastRate).toFixed(1)}% place ${r.averagePlace.toFixed(2)} score ${r.averageScore.toFixed(1)} cash ${r.averageBalance.toFixed(1)} spent ${r.averageSpent.toFixed(1)} tiles ${r.averageTilesWon.toFixed(1)} words ${r.averageWords.toFixed(2)} rack ${r.averagePlayableRackValue.toFixed(1)}`);
   if (out) console.log(`wrote ${path.resolve(out)}`);
 }
 
-if (!isMainThread) {
-  const job = workerData as Job;
+async function work(job: Job) {
   const dict = Dict.load();
   const ev = new RackEval(dict, 16);
   const byLength = [...dict.allWords].sort((a, b) => b.length - a.length || a.localeCompare(b));
-  const run = (o: SandboxOptions) => job.indices.map((i) => ({ index: i, ...runMatch(gameSeed(o.seed, i), o, ev, byLength) }));
-  parentPort!.postMessage({ base: run(job.base), cand: run(job.cand) });
+  // One engine per distinct native setting; paired arms with equal settings share it.
+  const drivers = new Map<string, NativeDriver>();
+  const driverFor = (o: SandboxOptions) => {
+    if (!o.seats.includes("native")) return undefined;
+    const key = JSON.stringify(o.native);
+    if (!drivers.has(key)) drivers.set(key, new NativeDriver(sandboxConfig(o.native)));
+    return drivers.get(key);
+  };
+  const out: { base: Game[]; cand: Game[] } = { base: [], cand: [] };
+  try {
+    for (const i of job.indices) {
+      out.base.push({ index: i, ...await runMatch(gameSeed(job.base.seed, i), job.base, ev, byLength, driverFor(job.base), "b") });
+      out.cand.push({ index: i, ...await runMatch(gameSeed(job.cand.seed, i), job.cand, ev, byLength, driverFor(job.cand), "c") });
+    }
+  } finally {
+    for (const d of drivers.values()) d.close();
+  }
+  return out;
+}
+
+if (!isMainThread) {
+  work(workerData as Job).then((r) => parentPort!.postMessage(r), (e) => { throw e; });
 } else if (import.meta.url === pathToFileURL(process.argv[1] ?? "").href) {
   main(process.argv.slice(2)).catch((e) => {
     console.error(e instanceof Error ? e.message : String(e));

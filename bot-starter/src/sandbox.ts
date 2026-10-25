@@ -6,12 +6,27 @@ import * as fs from "node:fs";
 import * as path from "node:path";
 import { pathToFileURL } from "node:url";
 import { A, BAG, Dict, LETTER_VALUE } from "./dict.js";
-import { pacedLambda } from "./policy.js";
+import { bidAmount, pacedLambda, shouldDumpPlan } from "./policy.js";
 import { RackEval } from "./rackeval.js";
 import { makeRng, type Rng } from "./rng.js";
+import type { NativeDriver, NativeSettings } from "./sandbox-native.js";
 
-export type Policy = "cheap" | "value" | "aggressive" | "rack" | "live-lite" | "planner";
-const POLICIES: Policy[] = ["cheap", "value", "aggressive", "rack", "live-lite", "planner"];
+// `native` drives the live engine; `profile:<bot>` bids from that bot's fitted
+// public-data model; `field` draws a profile per game, weighted by matches.
+export type Policy = "cheap" | "value" | "aggressive" | "rack" | "live-lite" | "planner" | "native" | "field" | `profile:${string}`;
+const POLICIES = ["cheap", "value", "aggressive", "rack", "live-lite", "planner", "native", "field"];
+
+export interface BidProfile {
+  matches: number;
+  a: number;
+  b_face: number;
+  c_vowel: number;
+  d_late: number;
+  e_endgame: number;
+  sigma: number;
+}
+
+export const DEFAULT_PROFILES = path.resolve(path.dirname(new URL(import.meta.url).pathname), "../data/opponent-profiles.json");
 const START_CASH = 100;
 const START_RACK = 5;
 const ALL_IN_ROUNDS = 5;
@@ -23,7 +38,13 @@ const PRICE_SLOPE = 2.5;
 interface Player {
   seat: number;
   policy: Policy;
+  profile?: string;
   rack: Uint8Array;
+  start: Uint8Array;
+  // Won letters not yet seen in a word, and starting tiles a word revealed:
+  // what the other seats can infer, as the live belief state does.
+  known: Uint8Array;
+  revealed: Uint8Array;
   balance: number;
   score: number;
   spent: number;
@@ -52,6 +73,18 @@ export interface SandboxOptions {
   earlyBidCap: number;
   earlyBidAuctions: number;
   auction: "vickrey" | "first-price";
+  native: NativeSettings;
+  profiles: string;
+  // Share of profile bid noise common to all seats in an auction: bots value
+  // the same letter in the same state alike, which tightens the runner-up gap.
+  fieldCorr: number;
+  // Calibration of profile bids to live prices: added to every latent bid,
+  // and a multiplier on each profile's noise.
+  fieldShift: number;
+  fieldSigma: number;
+  // Weight on the letter's exact marginal value to the seat's own rack. The
+  // fitted profiles are rack-blind; real bots chase letters their words need.
+  fieldRack: number;
   out?: string;
 }
 
@@ -75,8 +108,8 @@ export function parseArgs(args: string[]): SandboxOptions {
   const seatArg = args.includes("--seats") ? args[args.indexOf("--seats") + 1] : undefined;
   const seats = (seatArg ?? "live-lite,planner,rack,aggressive,value,cheap")
     .split(",").map((s) => s.trim()) as Policy[];
-  if (seats.some((p) => !POLICIES.includes(p)))
-    throw new Error(`Unknown policy in --seats. Choose: ${POLICIES.join(", ")}`);
+  if (seats.some((p) => !POLICIES.includes(p) && !p.startsWith("profile:")))
+    throw new Error(`Unknown policy in --seats. Choose: ${POLICIES.join(", ")}, profile:<bot>`);
   if (seats.length < 2 || seats.length > 12) throw new Error("--seats needs 2–12 comma-separated policies");
   const auctionArg = args.includes("--auction") ? args[args.indexOf("--auction") + 1] : "vickrey";
   if (auctionArg !== "vickrey" && auctionArg !== "first-price")
@@ -103,6 +136,18 @@ export function parseArgs(args: string[]): SandboxOptions {
     earlyBidCap,
     earlyBidAuctions: Math.floor(earlyBidAuctions),
     auction: auctionArg,
+    native: {
+      paidBid: numberArg(args, "--native-paid-bid", 1) !== 0,
+      oppBonus: numberArg(args, "--opp-bonus", 8),
+      oppSlope: numberArg(args, "--opp-slope", 2.5),
+      oppJitter: numberArg(args, "--opp-jitter", 4),
+      threads: intArg(args, "--native-threads", 2),
+    },
+    fieldCorr: numberArg(args, "--field-corr", 0),
+    fieldShift: numberArg(args, "--field-shift", 0),
+    fieldSigma: numberArg(args, "--field-sigma", 1),
+    fieldRack: numberArg(args, "--field-rack", 1),
+    profiles: args.includes("--profiles") ? path.resolve(args[args.indexOf("--profiles") + 1]!) : DEFAULT_PROFILES,
     out: outArg,
   };
 }
@@ -143,6 +188,11 @@ function wordReward(word: string): number {
 function cashWord(p: Player, word: string): void {
   const reward = wordReward(word);
   removeWord(p.rack, word);
+  for (const c of word) {
+    const l = c.charCodeAt(0) - A;
+    if (p.known[l]! > 0) p.known[l]!--;
+    else p.revealed[l]!++;
+  }
   p.balance += reward;
   p.score += reward;
   p.wordCount++;
@@ -235,6 +285,43 @@ function pacedRackBid(
   return Math.max(0, Math.min(p.balance, bid));
 }
 
+const profileCache = new Map<string, Record<string, BidProfile>>();
+
+export function loadProfiles(file: string): Record<string, BidProfile> {
+  let out = profileCache.get(file);
+  if (!out) {
+    out = JSON.parse(fs.readFileSync(file, "utf8")).profiles as Record<string, BidProfile>;
+    profileCache.set(file, out);
+  }
+  return out;
+}
+
+// A fitted latent bid, capped at the balance. `z` is a standard normal draw.
+function profileBid(
+  prof: BidProfile,
+  letter: number,
+  balance: number,
+  round: number,
+  auctions: number,
+  auctionsLeft: number,
+  z: number,
+): number {
+  if (auctionsLeft <= 1 || balance <= 0) return 0; // the final letter cannot be played
+  const vowel = [0, 4, 8, 14, 20].includes(letter) ? 1 : 0;
+  const y = prof.a + prof.b_face * LETTER_VALUE[letter]! + prof.c_vowel * vowel +
+    prof.d_late * (round - 1) / auctions + prof.e_endgame * (auctionsLeft - 1 < 6 ? 1 : 0) + prof.sigma * z;
+  return Math.max(0, Math.min(balance, Math.round(y)));
+}
+
+function gaussian(rng: Rng): number {
+  const u = Math.max(1e-12, rng());
+  return Math.sqrt(-2 * Math.log(u)) * Math.cos(2 * Math.PI * rng());
+}
+
+function isFace(p: Player): boolean {
+  return p.policy === "cheap" || p.policy === "value" || p.policy === "aggressive";
+}
+
 function bidFor(
   p: Player,
   letter: number,
@@ -244,11 +331,20 @@ function bidFor(
   ev: RackEval,
   jitter: number,
   options: SandboxOptions,
+  z = 0,
+  auctions = 0,
 ): number {
-  if (p.policy === "cheap" || p.policy === "value" || p.policy === "aggressive")
-    return fixedBid(p.policy, letter, p.balance, jitter);
+  if (isFace(p)) return fixedBid(p.policy, letter, p.balance, jitter);
+  if (p.profile) {
+    const prof = loadProfiles(options.profiles)[p.profile]!;
+    const need = options.fieldRack > 0 && auctionsLeft > 1
+      ? options.fieldRack * Math.max(0, ev.best(withLetter(p.rack, letter), 16) - ev.best(p.rack, 16))
+      : 0;
+    return profileBid({ ...prof, a: prof.a + options.fieldShift + need, sigma: prof.sigma * options.fieldSigma },
+      letter, p.balance, round, auctions || round + auctionsLeft - 1, auctionsLeft, z);
+  }
   return pacedRackBid(p, letter, remaining, round, auctionsLeft, ev,
-    p.policy === "planner" ? "live-lite" : p.policy, options);
+    p.policy === "planner" || p.policy === "native" ? "live-lite" : p.policy, options);
 }
 
 function settleAuction(
@@ -272,11 +368,12 @@ function settleAuction(
   p.spent += paid;
   p.won++;
   p.rack[letter]++;
+  p.known[letter]++;
   return winner;
 }
 
 function copyPlayers(players: Player[]): Player[] {
-  return players.map((p) => ({ ...p, rack: p.rack.slice() }));
+  return players.map((p) => ({ ...p, rack: p.rack.slice(), known: p.known.slice(), revealed: p.revealed.slice() }));
 }
 
 function makeScenarios(
@@ -332,7 +429,7 @@ function plannerBid(
         makeRng(scenario.currentTieSeed), options.auction);
       for (let i = 0; i < simulated.length; i++) {
         const p = simulated[i]!;
-        if (p.policy === "cheap" || p.policy === "value" || p.policy === "aggressive") {
+        if (isFace(p)) {
           if (currentWinner === p.seat) playFaceWord(p, byLength);
         }
         else applyStrategicWords(p, ev);
@@ -346,7 +443,7 @@ function plannerBid(
           left, ev, scenario.jitters[t]![i]!, options));
         const futureWinner = settleAuction(simulated, bids, l, makeRng(Math.floor(scenario.tieU[t]! * 0xffffffff)), options.auction);
         for (const p of simulated) {
-          if (p.policy === "cheap" || p.policy === "value" || p.policy === "aggressive") {
+          if (isFace(p)) {
             if (futureWinner === p.seat) playFaceWord(p, byLength);
           }
           else applyStrategicWords(p, ev, left <= ENDGAME_ROUNDS);
@@ -368,47 +465,142 @@ function plannerBid(
 
 function initialPlayers(seats: Policy[]): Player[] {
   return seats.map((policy, seat) => ({
-    seat, policy, rack: new Uint8Array(26), balance: START_CASH,
+    seat, policy, rack: new Uint8Array(26), start: new Uint8Array(26),
+    known: new Uint8Array(26), revealed: new Uint8Array(26), balance: START_CASH,
     score: 0, spent: 0, spentByQuarter: [0, 0, 0, 0], won: 0, wordCount: 0, wordRewards: 0,
   }));
 }
 
 function playAllFinal(players: Player[], ev: RackEval, byLength: string[]): void {
   for (const p of players) {
-    if (p.policy === "cheap" || p.policy === "value" || p.policy === "aggressive") playFaceWord(p, byLength);
-    else applyStrategicWords(p, ev, true);
+    if (isFace(p)) playFaceWord(p, byLength);
+    else if (p.policy !== "native") applyStrategicWords(p, ev, true);
   }
 }
 
-export function runMatch(
+interface NativeState {
+  lastCashinKey: string | null;
+  sinceCashin: number;
+}
+
+// One auction for a native seat, mirroring the live client (config at
+// b10334e): cash-ins that beat holding by CASH_MARGIN outside the endgame
+// window, then the engine's paid-tile fair bid, else v / lambda.
+async function nativeBid(
+  p: Player,
+  players: Player[],
+  letter: number,
+  bagAfter: number,
+  auctioned: Uint8Array,
+  matchId: string,
+  round: number,
+  st: NativeState,
+  driver: NativeDriver,
+  ev: RackEval,
+  options: SandboxOptions,
+): Promise<number> {
+  const cfg = driver.cfg;
+  const usableLeft = Math.max(0, bagAfter - 1);
+  const isFinal = bagAfter === 0;
+  if (isFinal || shouldDumpPlan(usableLeft, false, cfg)) dumpPlan(p, ev);
+  if (isFinal || p.balance < 1) return 0;
+  st.sinceCashin++;
+  let result = null;
+  for (let pass = 0; pass < 4; pass++) {
+    const rackKey = RackEval.keyOf(p.rack);
+    const needCashin = rackKey !== st.lastCashinKey || st.sinceCashin >= cfg.cashinEvery;
+    const U = new Uint8Array(26);
+    for (let l = 0; l < 26; l++) {
+      let u = BAG[l]! - p.start[l]! - auctioned[l]!;
+      for (const q of players) if (q !== p) u -= q.revealed[l]!;
+      U[l] = Math.max(0, u);
+    }
+    result = await driver.evaluate({
+      matchId, auctionId: String(round), letter, isFinal, usableLeft, bagTotal: bagAfter,
+      firstPrice: options.auction === "first-price", balance: p.balance, score: p.score,
+      rack: p.rack.slice(), U, rackKey, needCashin,
+      opps: players.filter((q) => q !== p).map((q) => ({ botId: String(q.seat), balance: q.balance, kind: "Real" as const })),
+    });
+    if (!needCashin) break;
+    st.lastCashinKey = rackKey;
+    st.sinceCashin = 0;
+    const best = result.cashin[0];
+    if (shouldDumpPlan(usableLeft, false, cfg) || !best || best.gain <= cfg.cashMargin || !fits(best.word, p.rack)) break;
+    cashWord(p, best.word);
+  }
+  if (!result) return 0;
+  if (cfg.nativePaidBid && result.fairBid !== null) return Math.max(0, Math.min(p.balance, Math.floor(result.fairBid)));
+  return bidAmount(result.v[letter]!, p.balance, usableLeft, cfg, undefined, result.lam).amount;
+}
+
+function dumpPlan(p: Player, ev: RackEval): void {
+  if (total(p.rack) < 2) return;
+  for (const word of ev.plan(p.rack, 22, 400_000).words) if (fits(word, p.rack)) cashWord(p, word);
+}
+
+export async function runMatch(
   gameSeed: number,
   options: SandboxOptions,
   ev: RackEval,
   byLength: string[],
-): Record<string, unknown> {
+  driver?: NativeDriver,
+  tag = "",
+): Promise<Record<string, unknown>> {
   const rng = makeRng(gameSeed);
   // Keep planner sampling independent of the real deck/tie stream so changes
   // to rollout settings remain paired on the same game seed.
   const plannerRng = makeRng((gameSeed ^ 0xa5a5a5a5) >>> 0);
+  // Profile bid noise has its own stream, drawn for every seat every round.
+  const profileRng = makeRng((gameSeed ^ 0x0ddba11) >>> 0);
   // Seat order decides who is dealt which starting rack. A separate stream
   // keeps the deck unchanged and gives paired runs the same assignment.
+  const seatRng = makeRng((gameSeed ^ 0x5eed5eed) >>> 0);
   const seatOrder = options.seats.slice();
-  shuffle(seatOrder, makeRng((gameSeed ^ 0x5eed5eed) >>> 0));
+  shuffle(seatOrder, seatRng);
   const bag: number[] = [];
   for (let l = 0; l < BAG.length; l++) for (let n = 0; n < BAG[l]!; n++) bag.push(l);
   shuffle(bag, rng);
   const players = initialPlayers(seatOrder);
+  if (players.some((p) => p.policy === "field" || p.policy.startsWith("profile:"))) {
+    const pool = Object.entries(loadProfiles(options.profiles));
+    const weight = pool.reduce((sum, [, v]) => sum + v.matches, 0);
+    for (const p of players) {
+      if (p.policy.startsWith("profile:")) p.profile = p.policy.slice(8);
+      else if (p.policy === "field") {
+        let u = seatRng() * weight;
+        p.profile = pool.find(([, v]) => (u -= v.matches) < 0)?.[0] ?? pool[0]![0];
+      }
+      if (p.profile && !loadProfiles(options.profiles)[p.profile]) throw new Error(`no profile for ${p.profile}`);
+    }
+  }
+  if (players.some((p) => p.policy === "native") && !driver) throw new Error("native seat needs a NativeDriver");
   let cursor = 0;
   for (const p of players) for (let n = 0; n < START_RACK; n++) p.rack[bag[cursor++]! ]++;
+  for (const p of players) p.start.set(p.rack);
   const remaining = bag.slice(cursor);
   const auctions = remaining.length;
+  const auctioned = new Uint8Array(26);
+  const matchId = `${tag}${gameSeed}`;
+  const nativeState = players.map((): NativeState => ({ lastCashinKey: null, sinceCashin: 0 }));
+  const auctionLog: { letter: string; winner: number | null; paid: number; top: number }[] = [];
   longestCache.clear();
   for (let round = 1; round <= auctions; round++) {
     const letter = remaining.shift()!;
+    auctioned[letter]++;
     const auctionsLeft = auctions - round + 1;
     const jitter = players.map(() => Math.floor(rng() * 5) - 2);
+    const common = gaussian(profileRng);
+    const rho = options.fieldCorr;
+    const z = players.map(() => rho * common + Math.sqrt(1 - rho * rho) * gaussian(profileRng));
     const bids = players.map((p, i) => bidFor(p, letter, remaining, round,
-      auctionsLeft, ev, jitter[i]!, options));
+      auctionsLeft, ev, jitter[i]!, options, z[i]!, auctions));
+    for (let i = 0; i < players.length; i++) {
+      const p = players[i]!;
+      if (p.policy === "native") {
+        bids[i] = await nativeBid(p, players, letter, remaining.length, auctioned, matchId,
+          round, nativeState[i]!, driver!, ev, options);
+      }
+    }
     for (let i = 0; i < players.length; i++) {
       if (players[i]!.policy !== "planner") continue;
       bids[i] = plannerBid(i, letter, players, bids, remaining, round,
@@ -416,23 +608,31 @@ export function runMatch(
     }
     const spentBefore = players.map((p) => p.spent);
     const winner = settleAuction(players, bids, letter, rng, options.auction);
+    auctionLog.push({
+      letter: String.fromCharCode(A + letter), winner,
+      paid: winner === null ? 0 : players[winner]!.spent - spentBefore[winner]!, top: Math.max(...bids),
+    });
     const quarter = Math.min(3, Math.floor(4 * (round - 1) / auctions));
     for (let i = 0; i < players.length; i++)
       players[i]!.spentByQuarter[quarter]! += players[i]!.spent - spentBefore[i]!;
     for (const p of players) {
-      if (p.policy === "cheap" || p.policy === "value" || p.policy === "aggressive") {
+      if (isFace(p)) {
         if (winner === p.seat) playFaceWord(p, byLength);
-      } else applyStrategicWords(p, ev, auctionsLeft <= ENDGAME_ROUNDS);
+      } else if (p.policy !== "native") applyStrategicWords(p, ev, auctionsLeft <= ENDGAME_ROUNDS);
     }
   }
+  // The server ends the match when the last auction settles, so nobody plays
+  // after it: the native seat's final dump already ran during that auction.
   playAllFinal(players, ev, byLength);
   const maxScore = Math.max(...players.map((p) => p.score));
   const standings = players.map((p) => ({
     seat: p.seat,
     policy: p.policy,
+    profile: p.profile ?? null,
     score: p.score,
     place: 1 + players.filter((q) => q.score > p.score).length,
     wonMatch: p.score === maxScore,
+    lastPlace: !players.some((q) => q.score < p.score),
     balance: p.balance,
     spent: p.spent,
     spentByQuarter: p.spentByQuarter,
@@ -442,7 +642,7 @@ export function runMatch(
     rack: RackEval.keyOf(p.rack),
     playableRackValue: ev.best(p.rack, 16),
   }));
-  return { seed: gameSeed, auctions, auctionType: options.auction, standings };
+  return { seed: gameSeed, auctions, auctionType: options.auction, standings, auctionLog };
 }
 
 export function summarize(games: Record<string, unknown>[], seats: Policy[]) {
@@ -455,6 +655,7 @@ export function summarize(games: Record<string, unknown>[], seats: Policy[]) {
       matches: ps.length,
       wins: ps.filter((r) => r.wonMatch).length,
       winRate: ps.filter((r) => r.wonMatch).length / Math.max(1, ps.length),
+      lastRate: ps.filter((r) => r.lastPlace).length / Math.max(1, ps.length),
       averagePlace: avg("place"),
       averageScore: avg("score"),
       averageBalance: avg("balance"),
@@ -466,14 +667,21 @@ export function summarize(games: Record<string, unknown>[], seats: Policy[]) {
   });
 }
 
-export function runSandbox(options: SandboxOptions) {
+export async function runSandbox(options: SandboxOptions) {
   const dict = Dict.load();
   const ev = new RackEval(dict, 16);
   const byLength = [...dict.allWords].sort((a, b) => b.length - a.length || a.localeCompare(b));
   const games: Record<string, unknown>[] = [];
-  for (let i = 0; i < options.games; i++) {
-    const seed = (options.seed + Math.imul(i, 0x9e3779b9)) >>> 0;
-    games.push(runMatch(seed, options, ev, byLength));
+  const driver = options.seats.includes("native")
+    ? new (await import("./sandbox-native.js")).NativeDriver((await import("./sandbox-native.js")).sandboxConfig(options.native))
+    : undefined;
+  try {
+    for (let i = 0; i < options.games; i++) {
+      const seed = (options.seed + Math.imul(i, 0x9e3779b9)) >>> 0;
+      games.push(await runMatch(seed, options, ev, byLength, driver));
+    }
+  } finally {
+    driver?.close();
   }
   const result = {
     description: "Offline seeded game. planner is a short-horizon Monte Carlo best-response benchmark, not exact optimal play.",
@@ -489,14 +697,15 @@ export function runSandbox(options: SandboxOptions) {
   return result;
 }
 
-function format(result: ReturnType<typeof runSandbox>): string {
+function format(result: Awaited<ReturnType<typeof runSandbox>>): string {
   const lines = [
     `Offline sandbox: ${result.options.games} games, seed ${result.options.seed}, ${result.options.seats.length} seats, ${result.options.auction}`,
-    "policy      win%   avg place   avg score   cash left   tiles   words   rack value",
+    "policy      win%  last%   avg place   avg score   cash left   tiles   words   rack value",
   ];
   for (const r of result.summary) {
     lines.push(
       `${String(r.policy).padEnd(11)} ${(100 * Number(r.winRate)).toFixed(1).padStart(5)}%` +
+      ` ${(100 * Number(r.lastRate)).toFixed(1).padStart(5)}%` +
       ` ${Number(r.averagePlace).toFixed(2).padStart(10)}` +
       ` ${Number(r.averageScore).toFixed(1).padStart(11)}` +
       ` ${Number(r.averageBalance).toFixed(1).padStart(11)}` +
@@ -510,11 +719,8 @@ function format(result: ReturnType<typeof runSandbox>): string {
 }
 
 if (import.meta.url === pathToFileURL(process.argv[1] ?? "").href) {
-  try {
-    const result = runSandbox(parseArgs(process.argv.slice(2)));
-    console.log(format(result));
-  } catch (e) {
+  runSandbox(parseArgs(process.argv.slice(2))).then((result) => console.log(format(result)), (e) => {
     console.error(e instanceof Error ? e.message : String(e));
     process.exitCode = 1;
-  }
+  });
 }
