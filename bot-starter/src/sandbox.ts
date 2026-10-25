@@ -27,6 +27,7 @@ interface Player {
   balance: number;
   score: number;
   spent: number;
+  spentByQuarter: number[];
   won: number;
   wordCount: number;
   wordRewards: number;
@@ -368,7 +369,7 @@ function plannerBid(
 function initialPlayers(seats: Policy[]): Player[] {
   return seats.map((policy, seat) => ({
     seat, policy, rack: new Uint8Array(26), balance: START_CASH,
-    score: 0, spent: 0, won: 0, wordCount: 0, wordRewards: 0,
+    score: 0, spent: 0, spentByQuarter: [0, 0, 0, 0], won: 0, wordCount: 0, wordRewards: 0,
   }));
 }
 
@@ -413,7 +414,11 @@ export function runMatch(
       bids[i] = plannerBid(i, letter, players, bids, remaining, round,
         auctionsLeft, ev, plannerRng, options, byLength);
     }
+    const spentBefore = players.map((p) => p.spent);
     const winner = settleAuction(players, bids, letter, rng, options.auction);
+    const quarter = Math.min(3, Math.floor(4 * (round - 1) / auctions));
+    for (let i = 0; i < players.length; i++)
+      players[i]!.spentByQuarter[quarter]! += players[i]!.spent - spentBefore[i]!;
     for (const p of players) {
       if (p.policy === "cheap" || p.policy === "value" || p.policy === "aggressive") {
         if (winner === p.seat) playFaceWord(p, byLength);
@@ -430,6 +435,7 @@ export function runMatch(
     wonMatch: p.score === maxScore,
     balance: p.balance,
     spent: p.spent,
+    spentByQuarter: p.spentByQuarter,
     tilesWon: p.won,
     words: p.wordCount,
     wordRewards: p.wordRewards,
@@ -439,7 +445,7 @@ export function runMatch(
   return { seed: gameSeed, auctions, auctionType: options.auction, standings };
 }
 
-function summarize(games: Record<string, unknown>[], seats: Policy[]) {
+export function summarize(games: Record<string, unknown>[], seats: Policy[]) {
   const rows = games.flatMap((g) => g.standings as Record<string, unknown>[]);
   return [...new Set(seats)].map((policy) => {
     const ps = rows.filter((r) => r.policy === policy);
