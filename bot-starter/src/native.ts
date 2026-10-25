@@ -6,6 +6,7 @@ import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
 import { existsSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import type { Config } from "./config.js";
+import type { Opp } from "./simmodel.js";
 import type { Snapshot } from "./state.js";
 
 export interface NativeResult {
@@ -24,7 +25,21 @@ export interface NativeResult {
   cashin: { word: string; reward: number; delta: number; gain: number }[];
 }
 
-const KIND: Record<string, number> = { Cheapskate: 0, ValueBidder: 1, Aggressive: 2, Real: 3 };
+const KIND: Record<string, number> = { Cheapskate: 0, ValueBidder: 1, Aggressive: 2, Real: 3, Prior: 4 };
+
+// One opponent's SNAP fields: `kind bal bonus slope jit`, or for a fitted
+// prior `4 bal pi (mu sd)*26`.
+export function oppFields(o: Opp, cf: Pick<Config, "realOppBaseBonus" | "realOppSlope" | "realOppJitter">): string {
+  const bal = Math.max(0, Math.round(o.balance));
+  if (o.kind === "Prior" && o.prior) {
+    const p = o.prior;
+    let s = `4 ${bal} ${p.pi.toFixed(4)}`;
+    for (let L = 0; L < 26; L++) s += ` ${p.mu[L].toFixed(2)} ${p.sd[L].toFixed(3)}`;
+    return s;
+  }
+  const kind = o.kind === "Prior" ? 3 : (KIND[o.kind] ?? 3);
+  return `${kind} ${bal} ${cf.realOppBaseBonus} ${cf.realOppSlope} ${cf.realOppJitter}`;
+}
 
 export function nativePaths() {
   return {
@@ -140,9 +155,7 @@ export class NativeEngine {
 
   snapshot(s: Snapshot) {
     const cf = this.cfg;
-    const opps = s.opps
-      .map((o) => `${KIND[o.kind] ?? 3} ${Math.max(0, Math.round(o.balance))} ${cf.realOppBaseBonus} ${cf.realOppSlope} ${cf.realOppJitter}`)
-      .join(" ");
+    const opps = s.opps.map((o) => oppFields(o, cf)).join(" ");
     this.send(
       `SNAP ${s.seq} ${s.matchId} ${s.auctionId ?? "none"} ${s.letter} ${s.usableLeft} ${Math.round(s.balance)} ` +
         `${Math.round(s.score)} ${s.needCashin ? 1 : 0} ${Array.from(s.rack).join(" ")} ${Array.from(s.U).join(" ")} ` +

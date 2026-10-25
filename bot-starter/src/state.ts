@@ -8,6 +8,7 @@
 // the middle of a match.
 
 import { A, BAG, LETTER_VALUE } from "./dict.js";
+import { OnlineOffsets, TOTAL_AUCTIONS, type OnlineCfg, type OppPriors } from "./oppmodel.js";
 import type { OppKind, Opp } from "./simmodel.js";
 
 interface Ts {
@@ -307,21 +308,95 @@ export function derive(store: Store, matchId: bigint, myBotId: bigint): Derived 
 
 let seqCounter = 0;
 
+// ---- fitted opponent priors (OPP_PRIORS) -------------------------------------
+
+export interface OppPriorCtx {
+  priors: OppPriors;
+  online: OnlineCfg;
+}
+
+export const STARTING_BALANCE = 100;
+
+const offsetCache = new WeakMap<MatchData, { key: string; ctx: OppPriorCtx; off: Map<string, number> }>();
+
+// Each opponent's in-match offset to its prior mean, from every closed
+// auction so far: the winner bid at least the clearing price, everyone else
+// at most it. Replays the match from the tables (balances from the start,
+// letters won minus letters played), cached until a result or play arrives.
+export function matchOffsets(data: MatchData, myBotId: bigint, ctx: OppPriorCtx): Map<string, number> {
+  const key = `${data.results.size}/${data.plays.size}/${data.parts.size}`;
+  const hit = offsetCache.get(data);
+  if (hit && hit.key === key && hit.ctx === ctx) return hit.off;
+  const off = new Map<string, number>();
+  if (ctx.online.tau > 0) {
+    const on = new OnlineOffsets(ctx.online);
+    const bots = [...new Set([...data.parts.values()].map((p) => p.botId))];
+    const bal = new Map<bigint, number>(bots.map((b) => [b, STARTING_BALANCE] as const));
+    const known = new Map<bigint, Uint8Array>(bots.map((b) => [b, new Uint8Array(26)] as const));
+    const res = [...data.results.values()].sort((a, b) =>
+      a.closedAt.microsSinceUnixEpoch < b.closedAt.microsSinceUnixEpoch ? -1 : a.closedAt.microsSinceUnixEpoch > b.closedAt.microsSinceUnixEpoch ? 1 : 0,
+    );
+    const plays = [...data.plays.values()].sort((a, b) =>
+      a.playedAt.microsSinceUnixEpoch < b.playedAt.microsSinceUnixEpoch ? -1 : a.playedAt.microsSinceUnixEpoch > b.playedAt.microsSinceUnixEpoch ? 1 : 0,
+    );
+    let wi = 0;
+    res.forEach((r, i) => {
+      while (wi < plays.length && plays[wi].playedAt.microsSinceUnixEpoch < r.closedAt.microsSinceUnixEpoch) {
+        const p = plays[wi++];
+        if (!bal.has(p.botId)) continue;
+        bal.set(p.botId, bal.get(p.botId)! + Number(p.totalReward));
+        const k = known.get(p.botId)!;
+        for (const ch of p.word) {
+          const L = ch.charCodeAt(0) - A;
+          if (k[L] > 0) k[L]--;
+        }
+      }
+      const L = r.letter.charCodeAt(0) - A;
+      const w = r.winnerBotId ?? null;
+      const paid = Number(r.paid);
+      const left = Math.max(0, TOTAL_AUCTIONS - 1 - i);
+      for (const b of bots) {
+        if (b === myBotId) continue;
+        const c = { L, left, bal: bal.get(b)!, known: known.get(b)! };
+        on.observe(String(b), ctx.priors.dist(String(b), c), c.bal, w === b, w === null ? 0 : paid);
+      }
+      if (w !== null && bal.has(w) && bal.get(w)! >= paid) {
+        bal.set(w, bal.get(w)! - paid);
+        known.get(w)![L]++;
+      }
+    });
+    for (const b of bots) if (b !== myBotId) off.set(String(b), on.offset(String(b)));
+  }
+  offsetCache.set(data, { key, ctx, off });
+  return off;
+}
+
 export function buildSnapshot(
   store: Store,
   d: Derived,
   myBotId: bigint,
   needCashin: boolean,
   rackKey: string,
+  oppPriors: OppPriorCtx | null = null,
 ): Snapshot {
   const opps: Opp[] = [];
+  const offsets = oppPriors ? matchOffsets(d.data, myBotId, oppPriors) : null;
   for (const p of d.data.parts.values()) {
     if (p.botId === myBotId) continue;
-    opps.push({
-      botId: String(p.botId),
-      balance: Number(p.balance),
-      kind: oppKind(store.bots.get(p.botId)),
-    });
+    const kind = oppKind(store.bots.get(p.botId));
+    const o: Opp = { botId: String(p.botId), balance: Number(p.balance), kind };
+    if (oppPriors && kind === "Real") {
+      const offset = offsets!.get(o.botId) ?? 0;
+      const t = oppPriors.priors.letterTable(
+        o.botId,
+        { left: d.match.bagTotal, bal: o.balance, known: d.belief.known.get(p.botId) ?? new Uint8Array(26) },
+        offset,
+      );
+      o.kind = "Prior";
+      o.prior = { mu: Array.from(t.mu), sd: Array.from(t.sd), pi: t.pi[Math.max(0, d.openAuction ? d.openAuction.letter.charCodeAt(0) - A : 0)] };
+      o.priorOffset = offset;
+    }
+    opps.push(o);
   }
   return {
     seq: ++seqCounter,

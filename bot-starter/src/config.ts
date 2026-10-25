@@ -78,6 +78,14 @@ export interface Config {
   // still went broke mid-match (spend 79/0/0/92 by quarter in 16311). 0 disables.
   reserveStart: number;
   reserveUntil: number;
+  // Per-opponent bid priors fitted from public history (src/oppfit.ts
+  // export). Unset (the default) keeps the global REAL_OPP_* model for every
+  // real opponent. Set, every real opponent is modelled by its own prior
+  // (the population prior when it has no history).
+  oppPriors: string | null;
+  // In-match update of each opponent's offset; overrides the priors file's
+  // online.tau (its prior SD in coins). 0 disables, unset uses the file's.
+  oppOnlineTau: number | null;
 }
 
 export function loadConfig(): Config {
@@ -125,5 +133,7 @@ export function loadConfig(): Config {
     maxBidFloor: Math.max(0, num("MAX_BID_FLOOR", 20)),
     reserveStart: Math.max(0, num("RESERVE_START", 0)),
     reserveUntil: Math.max(0, num("RESERVE_UNTIL", 10)),
+    oppPriors: process.env.OPP_PRIORS ? process.env.OPP_PRIORS : null,
+    oppOnlineTau: process.env.OPP_ONLINE_TAU ? Math.max(0, num("OPP_ONLINE_TAU", 0)) : null,
   };
 }
