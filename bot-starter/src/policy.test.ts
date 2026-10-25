@@ -3,7 +3,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { LETTER_VALUE, letterIndex } from "./dict.js";
-import { applySafeCap, bidAmount, cashinGain, composeBid, inAllIn, lambdaFor, pacedLambda, shouldDumpPlan } from "./policy.js";
+import { applySafeCap, bidAmount, cashReserve, cashinGain, composeBid, inAllIn, lambdaFor, pacedLambda, shouldDumpPlan } from "./policy.js";
 import { makeRng } from "./rng.js";
 import { firstPriceBid, oppBid, payment, priceOf, wins, type Opp } from "./simmodel.js";
 
@@ -154,7 +154,7 @@ test("paced lambda spends the budget on the best value-per-coin letters", () => 
   assert.equal(bidAmount(8, 100, 30, { ...flat, lambdaMode: "paced" }, undefined, lam).amount, 10);
 });
 
-const composeCfg = { safeMaxBid: null, allinK: 5, nativePaidBid: true, paidBidWarmup: 1, earlyLambdaAuctions: 17, earlyLambdaMin: 0.4, maxBidFraction: 1, maxBidFloor: 20 };
+const composeCfg = { safeMaxBid: null, allinK: 5, nativePaidBid: true, paidBidWarmup: 1, earlyLambdaAuctions: 17, earlyLambdaMin: 0.4, maxBidFraction: 1, maxBidFloor: 20, reserveStart: 0, reserveUntil: 10 };
 const dec = (amount: number) => ({ amount, reason: "v/lambda" });
 
 test("composeBid uses the paid-tile bid after the warmup", () => {
@@ -186,4 +186,22 @@ test("composeBid caps large bids at max(floor, fraction of balance) outside the 
   assert.equal(composeBid(dec(10), 9, 0.2, 43, 15, 50, 72, cfg).amount, 36);
   assert.equal(composeBid(dec(10), 9, 0.2, 18, 30, 30, 25, cfg).amount, 18); // under the floor of 20
   assert.equal(composeBid(dec(72), 9, 0.2, null, 64, 3, 72, cfg).amount, 72); // all-in window
+});
+
+test("cash reserve tapers from RESERVE_START to 0 at RESERVE_UNTIL usable left", () => {
+  const r = { reserveStart: 30, reserveUntil: 10 };
+  assert.equal(cashReserve(66, r), 30);
+  assert.equal(cashReserve(38, r), 15);
+  assert.equal(cashReserve(10, r), 0);
+  assert.equal(cashReserve(66, { ...r, reserveStart: 0 }), 0);
+});
+
+test("composeBid holds back the reserve outside the all-in window", () => {
+  const cfg = { ...composeCfg, earlyLambdaAuctions: 0, reserveStart: 30 };
+  const r = composeBid(dec(10), 5, 0.3, 25, 30, 38, 30, cfg); // reserve 15
+  assert.equal(r.amount, 15);
+  assert.match(r.reason, /reserve 15/);
+  assert.equal(composeBid(dec(10), 5, 0.3, 12, 30, 38, 30, cfg).amount, 12); // under the cap
+  assert.equal(composeBid(dec(10), 5, 0.3, 25, 30, 38, 10, cfg).amount, 0); // balance below reserve
+  assert.equal(composeBid(dec(30), 5, 0.3, null, 64, 3, 30, cfg).amount, 30); // all-in window
 });

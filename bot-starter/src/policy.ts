@@ -59,7 +59,14 @@ export function applySafeCap(amount: number, cfg: Pick<Config, "safeMaxBid">): n
   return cfg.safeMaxBid === null ? amount : Math.min(amount, cfg.safeMaxBid);
 }
 
-type ComposeCfg = Pick<Config, "safeMaxBid" | "allinK" | "nativePaidBid" | "paidBidWarmup" | "earlyLambdaAuctions" | "earlyLambdaMin" | "maxBidFraction" | "maxBidFloor">;
+type ComposeCfg = Pick<Config, "safeMaxBid" | "allinK" | "nativePaidBid" | "paidBidWarmup" | "earlyLambdaAuctions" | "earlyLambdaMin" | "maxBidFraction" | "maxBidFloor" | "reserveStart" | "reserveUntil">;
+
+// Coins to hold back with `usableLeft` usable auctions to go.
+export function cashReserve(usableLeft: number, cfg: Pick<Config, "reserveStart" | "reserveUntil">): number {
+  if (!(cfg.reserveStart > 0) || usableLeft <= cfg.reserveUntil) return 0;
+  const frac = Math.min(1, (usableLeft - cfg.reserveUntil) / Math.max(1, FULL_USABLE - cfg.reserveUntil));
+  return Math.ceil(cfg.reserveStart * frac);
+}
 
 // The live bid from one engine result: the paid-tile fair bid when there is
 // one, else v / lambda (`dec`); capped at v / lambda for the first
@@ -82,10 +89,13 @@ export function composeBid(
   const earlyCap = early ? Math.floor(v / cfg.earlyLambdaMin) : Infinity;
   const sizeCap = cfg.maxBidFraction < 1 && !(usableLeft < cfg.allinK)
     ? Math.max(cfg.maxBidFloor, Math.floor(cfg.maxBidFraction * balance)) : Infinity;
-  const amount = applySafeCap(Math.max(0, Math.min(balance, requested, earlyCap, sizeCap)), cfg);
+  const reserve = usableLeft < cfg.allinK ? 0 : cashReserve(usableLeft, cfg);
+  const reserveCap = reserve > 0 ? balance - reserve : Infinity;
+  const amount = applySafeCap(Math.max(0, Math.min(balance, requested, earlyCap, sizeCap, reserveCap)), cfg);
   const reason = (paid === null ? dec.reason : warmup ? `paid-tile capped at v/lambda (warmup; ${dec.reason})` : "native paid-tile estimate") +
     (requested > earlyCap ? `; early lambda floor ${cfg.earlyLambdaMin}` : "") +
-    (Math.min(requested, earlyCap) > sizeCap ? `; size cap ${sizeCap}` : "");
+    (Math.min(requested, earlyCap) > sizeCap ? `; size cap ${sizeCap}` : "") +
+    (Math.min(requested, earlyCap, sizeCap) > reserveCap ? `; reserve ${reserve}` : "");
   return { amount, reason };
 }
 

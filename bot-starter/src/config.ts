@@ -73,6 +73,11 @@ export interface Config {
   // (Z for 43 of 72 in match 16132) starved the rest of the match. 1 disables.
   maxBidFraction: number;
   maxBidFloor: number;
+  // Keep a cash reserve that tapers linearly from RESERVE_START coins at the
+  // first auction to 0 at RESERVE_UNTIL usable auctions left: candidate 2
+  // still went broke mid-match (spend 79/0/0/92 by quarter in 16311). 0 disables.
+  reserveStart: number;
+  reserveUntil: number;
 }
 
 export function loadConfig(): Config {
@@ -118,5 +123,7 @@ export function loadConfig(): Config {
     earlyLambdaMin: Math.max(0, Math.min(1, num("EARLY_LAMBDA_MIN", 0))),
     maxBidFraction: Math.max(0, Math.min(1, num("MAX_BID_FRACTION", 1))),
     maxBidFloor: Math.max(0, num("MAX_BID_FLOOR", 20)),
+    reserveStart: Math.max(0, num("RESERVE_START", 0)),
+    reserveUntil: Math.max(0, num("RESERVE_UNTIL", 10)),
   };
 }
